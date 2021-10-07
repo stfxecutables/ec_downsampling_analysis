@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/414786742.svg)](https://zenodo.org/badge/latestdoi/414786742)
+
 # Installation (Cross-Platform)
 
 First install [Poetry](https://python-poetry.org/docs/#installation). Open a terminal, `cd` to
