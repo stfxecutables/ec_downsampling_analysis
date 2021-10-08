@@ -60,3 +60,10 @@ python analysis/feature_downsampling.py \
 Don't expect this to work on Windows, and it is most likely unfeasible to run all analyses like this
 on a single machine.
 
+Hypertuning can likely be done locally without too much trouble. For example, to tune the logistic
+regression classifier, run:
+
+```sh
+poetry run pytest tests/test_analysis_hypertune.py::test_lr_params
+```
+
