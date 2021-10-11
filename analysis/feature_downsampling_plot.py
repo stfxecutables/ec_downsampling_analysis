@@ -3,14 +3,20 @@ import sys
 from argparse import Namespace
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import pytest
 import seaborn as sbn
-from pandas import DataFrame
+from numpy import ndarray
+from pandas import DataFrame, Series
+from scipy.stats import linregress
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
+from typing_extensions import Literal
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
@@ -49,9 +55,33 @@ class PlotArgs:
     file: Path
     df: DataFrame
     standardize: bool
+    show: bool = False
 
 
-def plot_results(file: Path, df: DataFrame, curve: bool = True, standardize: bool = True, show: bool = False) -> None:
+def standardize_vals(df: DataFrame, acc: bool = False, con: bool = False) -> DataFrame:
+    df = df.copy()
+    fnames = ["d", "d-med", "AUC", "AUC-med", "delta", "delta-med"]
+    if acc:
+        fnames.append("Consistency")
+    if con:
+        fnames.append("Accuracy")
+    for f in fnames:
+        df[f] -= df[f].mean()
+        df[f] /= df[f].std(ddof=1)
+    return df
+
+
+def regression_line(x: ndarray, y: ndarray, loess: bool = False) -> ndarray:
+    if loess:  # REVERSED!
+        return lowess(y, x, frac=0.8, return_sorted=False)
+    res = linregress(x, y)
+    m, b = res.slope, res.intercept
+    return m * x + b
+
+
+def plot_by_downsampling(
+    file: Path, df: DataFrame, curve: bool = True, standardize: bool = True, show: bool = False
+) -> None:
     fig: plt.Figure
     ax: plt.Axes
     pieces = file.name.split("_")
@@ -118,19 +148,118 @@ def plot_results(file: Path, df: DataFrame, curve: bool = True, standardize: boo
     plt.close()
 
 
-def plot(args: PlotArgs) -> None:
-    plot_results(args.file, args.df, standardize=args.standardize, show=False)
+def plot_feat_quality_fits(
+    ax: plt.Axes, df: DataFrame, y_val: str = "Consistency", loess: bool = True, label: bool = False
+):
+    df = df.copy()
+    y_src = df[y_val].copy()  # y-values
+
+    d, d_med = df["d"], df["d-med"]
+    auc, auc_med = df["AUC"], df["AUC-med"]
+    delta, delta_med = df["delta"], df["delta-med"]
+
+    largs = dict(ax=ax, lw=2, legend=False)
+    info = {
+        "d": {**dict(color="#004aeb", label="Cohen's d (mean)", alpha=0.9), **largs},
+        # "d-med": {**dict(color="#004aeb", label="Cohen's d (median)", alpha=0.9), **largs},
+        "AUC": {**dict(color="#eb9100", label="AUC (mean)", alpha=0.9), **largs},
+        # "AUC-med": {**dict(color="#eb9100", label="AUC (median)", alpha=0.9), **largs},
+        "delta": {**dict(color="#ed00fa", label="delta (mean)", alpha=0.9), **largs},
+        # "delta-med": {**dict(color="#ed00fa", label="delta (median)", alpha=0.9), **largs},
+    }
+    if not label:
+        for key, val in info.items():
+            val["label"] = None
+    for fname, args in info.items():
+        x = df[fname].copy()
+        if loess:
+            x += np.random.normal(0, np.std(x, ddof=1))
+        idx = np.argsort(x)
+        x = x[idx]
+        y = np.copy(y_src)[idx]
+        smoothed = regression_line(x, y, loess=loess)
+        sbn.lineplot(x=x, y=smoothed, **args)
+    return
+
+
+def plot_by_feat_quality(
+    file: Path, df: DataFrame, curve: bool = True, standardize: bool = True, show: bool = False
+) -> None:
+    fig: plt.Figure
+    ax: plt.Axes
+    pieces = file.name.split("_")
+    ds = dataset = pieces[0]
+    classifier = file.name[len(ds) + 1 : file.name.find("__")]
+    if classifier == "":
+        return
+    df_all = df.copy()
+    df = df.copy()
+    if standardize:
+        df = standardize_vals(df)
+    p = df["Percent"].to_numpy().astype(float)
+    acc = df["Accuracy"]  # y-values
+    con = df["Consistency"]  # y-values
+    d, d_med = df["d"], df["d-med"]
+    auc, auc_med = df["AUC"], df["AUC-med"]
+    delta, delta_med = df["delta"], df["delta-med"]
+    sbn.set_style("darkgrid")
+    fig, axes = plt.subplots(ncols=2)
+    # sargs = dict(s=3, ax=ax, legend=False)
+    sargs = dict(size=p, legend=False)
+    if curve:
+        plot_feat_quality_fits(axes[0], df, "Consistency", loess=True)
+        plot_feat_quality_fits(axes[1], df, "Accuracy", loess=True)
+
+    # fmt: off
+    sbn.scatterplot(ax=axes[0], y=con, x=d, color="#004aeb", label="Cohen's d (mean)", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[0], y=con, x=auc, color="#eb9100", label="AUC (mean)", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[0], y=con, x=delta, color="#ed00fa", label="delta (mean)", alpha=0.9, **sargs)
+    # sbn.scatterplot(ax=axes[0], y=con, x=d_med, color="#004aeb", label="Cohen's d (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[0], y=con, x=auc_med, color="#eb9100", label="AUC (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[0], y=con, x=delta_med, color="#ed00fa", label="delta (median)", alpha=0.3, **sargs)
+
+    sbn.scatterplot(ax=axes[1], y=acc, x=d, color="#004aeb", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[1], y=acc, x=auc, color="#eb9100", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[1], y=acc, x=delta, color="#ed00fa", alpha=0.9, **sargs)
+    # sbn.scatterplot(ax=axes[1], y=acc, x=d_med, color="#004aeb", label="Cohen's d (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[1], y=acc, x=auc_med, color="#eb9100", label="AUC (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[1], y=acc, x=delta_med, color="#ed00fa", label="delta (median)", alpha=0.3, **sargs)
+    # fmt: on
+    axes[0].set_title(f"{dataset} - {classifier}: AEC and Feature Quality")
+    s = "Standarized " if standardize else ""
+    axes[0].set_xlabel(f"{s}Feature Separation/Quality")
+    axes[0].set_ylabel("AEC")
+    axes[1].set_title(f"{dataset} - {classifier}: AEC and Accuracy")
+    s = "Standarized " if standardize else ""
+    axes[1].set_xlabel(f"{s}Feature Separation/Quality")
+    axes[1].set_ylabel("AEC")
+    # axes[0].set_xlim(50, 100)
+    fig.legend().set_visible(True)
+    fig.set_size_inches(w=12, h=6)
+    if show:
+        plt.show()
+        return
+    s = "_standardized" if standardize else ""
+    pdf = PDF_DIR / f"{file.stem}{s}.pdf"
+    png = PNG_DIR / f"{file.stem}{s}.png"
+    fig.savefig(pdf)
+    fig.savefig(png, dpi=600)
+    plt.close()
+
+
+def plot_percent(args: PlotArgs) -> None:
+    plot_by_downsampling(args.file, args.df, standardize=args.standardize, show=args.show)
+
+
+def plot_quality(args: PlotArgs) -> None:
+    plot_by_feat_quality(args.file, args.df, standardize=args.standardize, show=args.show)
 
 
 if __name__ == "__main__":
-    # for file, df in tqdm(zip(JSONS, DFS), total=len(DFS), desc="Plotting"):
-    #     show = False
-    #     plot_results(file, df, standardize=True, show=show)
-    #     plot_results(file, df, standardize=False, show=show)
-    #     # sys.exit()
-
     args = []
-    args.extend([PlotArgs(file, df, standardize=True) for file, df in zip(JSONS, DFS)])
-    args.extend([PlotArgs(file, df, standardize=False) for file, df in zip(JSONS, DFS)])
-    process_map(plot, args, desc="Plotting")
+    args.extend([PlotArgs(file, df, show=True, standardize=True) for file, df in zip(JSONS, DFS)])
+    args.extend([PlotArgs(file, df, show=True, standardize=False) for file, df in zip(JSONS, DFS)])
+    process_map(plot_quality, args, desc="Plotting")
+    # for arg in args:
+    #     plot_quality(arg)
     print(f"Saved plots to {PDF_DIR.parent}")
