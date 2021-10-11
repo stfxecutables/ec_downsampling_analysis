@@ -3,6 +3,7 @@ import sys
 from argparse import Namespace
 from dataclasses import dataclass
 from pathlib import Path
+from time import strftime
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, no_type_check
 
 import matplotlib.pyplot as plt
@@ -25,7 +26,7 @@ CLASSIFIER_CHOICES = ["knn1", "knn3", "knn5", "knn10", "lr", "svm", "rf", "ada",
 DATASET_CHOICES = ["diabetes", "park", "trans", "spect"]
 ROOT = Path(__file__).resolve().parent.parent
 JSON_DIR = ROOT / "results/dfs/feat_2021-Oct07"
-PLOT_DIR = ROOT / "results/plots/feat_2021-Oct07"
+PLOT_DIR = ROOT / f"results/plots/feat_{strftime('%Y-%b%d')}"
 PDF_DIR = PLOT_DIR / "pdf"
 PNG_DIR = PLOT_DIR / "png"
 if not PDF_DIR.exists():
@@ -49,11 +50,15 @@ COLUMNS = [
     "delta-med",
 ]
 
+# DELTA = "#ed00fa"
+DELTA = "#000"
+
 
 @dataclass
 class PlotArgs:
     file: Path
     df: DataFrame
+    loess: bool
     standardize: bool
     show: bool = False
 
@@ -73,7 +78,7 @@ def standardize_vals(df: DataFrame, acc: bool = False, con: bool = False) -> Dat
 
 def regression_line(x: ndarray, y: ndarray, loess: bool = False) -> ndarray:
     if loess:  # REVERSED!
-        return lowess(y, x, frac=0.8, return_sorted=False)
+        return lowess(y, x, frac=0.85, return_sorted=False)
     res = linregress(x, y)
     m, b = res.slope, res.intercept
     return m * x + b
@@ -164,8 +169,8 @@ def plot_feat_quality_fits(
         # "d-med": {**dict(color="#004aeb", label="Cohen's d (median)", alpha=0.9), **largs},
         "AUC": {**dict(color="#eb9100", label="AUC (mean)", alpha=0.9), **largs},
         # "AUC-med": {**dict(color="#eb9100", label="AUC (median)", alpha=0.9), **largs},
-        "delta": {**dict(color="#ed00fa", label="delta (mean)", alpha=0.9), **largs},
-        # "delta-med": {**dict(color="#ed00fa", label="delta (median)", alpha=0.9), **largs},
+        "delta": {**dict(color=DELTA, label="delta (mean)", alpha=0.9), **largs},
+        # "delta-med": {**dict(color=DELTA, label="delta (median)", alpha=0.9), **largs},
     }
     if not label:
         for key, val in info.items():
@@ -183,7 +188,7 @@ def plot_feat_quality_fits(
 
 
 def plot_by_feat_quality(
-    file: Path, df: DataFrame, curve: bool = True, standardize: bool = True, show: bool = False
+    file: Path, df: DataFrame, curve: bool = True, standardize: bool = True, loess: bool = True, show: bool = False
 ) -> None:
     fig: plt.Figure
     ax: plt.Axes
@@ -205,25 +210,25 @@ def plot_by_feat_quality(
     sbn.set_style("darkgrid")
     fig, axes = plt.subplots(ncols=2)
     # sargs = dict(s=3, ax=ax, legend=False)
-    sargs = dict(size=p, legend=False)
+    sargs = dict(size=p / 2, alpha=0.3, legend=False)
     if curve:
-        plot_feat_quality_fits(axes[0], df, "Consistency", loess=True)
-        plot_feat_quality_fits(axes[1], df, "Accuracy", loess=True)
+        plot_feat_quality_fits(axes[0], df, "Consistency", loess=loess)
+        plot_feat_quality_fits(axes[1], df, "Accuracy", loess=loess)
 
     # fmt: off
-    sbn.scatterplot(ax=axes[0], y=con, x=d, color="#004aeb", label="Cohen's d (mean)", alpha=0.9, **sargs)
-    sbn.scatterplot(ax=axes[0], y=con, x=auc, color="#eb9100", label="AUC (mean)", alpha=0.9, **sargs)
-    sbn.scatterplot(ax=axes[0], y=con, x=delta, color="#ed00fa", label="delta (mean)", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[0], y=con, x=d, color="#004aeb", label="Cohen's d (mean)",  **sargs)
+    sbn.scatterplot(ax=axes[0], y=con, x=auc, color="#eb9100", label="AUC (mean)",  **sargs)
+    sbn.scatterplot(ax=axes[0], y=con, x=delta, color=DELTA, label="delta (mean)",  **sargs)
     # sbn.scatterplot(ax=axes[0], y=con, x=d_med, color="#004aeb", label="Cohen's d (median)", alpha=0.3, **sargs)
     # sbn.scatterplot(ax=axes[0], y=con, x=auc_med, color="#eb9100", label="AUC (median)", alpha=0.3, **sargs)
-    # sbn.scatterplot(ax=axes[0], y=con, x=delta_med, color="#ed00fa", label="delta (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[0], y=con, x=delta_med, color=DELTA label="delta (median)", alpha=0.3, **sargs)
 
-    sbn.scatterplot(ax=axes[1], y=acc, x=d, color="#004aeb", alpha=0.9, **sargs)
-    sbn.scatterplot(ax=axes[1], y=acc, x=auc, color="#eb9100", alpha=0.9, **sargs)
-    sbn.scatterplot(ax=axes[1], y=acc, x=delta, color="#ed00fa", alpha=0.9, **sargs)
+    sbn.scatterplot(ax=axes[1], y=acc, x=d, color="#004aeb",  **sargs)
+    sbn.scatterplot(ax=axes[1], y=acc, x=auc, color="#eb9100",  **sargs)
+    sbn.scatterplot(ax=axes[1], y=acc, x=delta, color=DELTA,  **sargs)
     # sbn.scatterplot(ax=axes[1], y=acc, x=d_med, color="#004aeb", label="Cohen's d (median)", alpha=0.3, **sargs)
     # sbn.scatterplot(ax=axes[1], y=acc, x=auc_med, color="#eb9100", label="AUC (median)", alpha=0.3, **sargs)
-    # sbn.scatterplot(ax=axes[1], y=acc, x=delta_med, color="#ed00fa", label="delta (median)", alpha=0.3, **sargs)
+    # sbn.scatterplot(ax=axes[1], y=acc, x=delta_med, color=DELTA, label="delta (median)", alpha=0.3, **sargs)
     # fmt: on
     axes[0].set_title(f"{dataset} - {classifier}: AEC and Feature Quality")
     s = "Standarized " if standardize else ""
@@ -232,16 +237,19 @@ def plot_by_feat_quality(
     axes[1].set_title(f"{dataset} - {classifier}: AEC and Accuracy")
     s = "Standarized " if standardize else ""
     axes[1].set_xlabel(f"{s}Feature Separation/Quality")
-    axes[1].set_ylabel("AEC")
+    axes[1].set_ylabel("Mean Accuracy")
     # axes[0].set_xlim(50, 100)
     fig.legend().set_visible(True)
     fig.set_size_inches(w=12, h=6)
     if show:
         plt.show()
         return
-    s = "_standardized" if standardize else ""
-    pdf = PDF_DIR / f"{file.stem}{s}.pdf"
-    png = PNG_DIR / f"{file.stem}{s}.png"
+    s = "standardized" if standardize else "unstandardized"
+    l = "loess" if loess else "linear"
+    pdf = PDF_DIR / f"{s}/{l}/{file.stem}_{l}_{s}.pdf"
+    png = PNG_DIR / f"{s}/{l}/{file.stem}_{l}_{s}.png"
+    os.makedirs(pdf.parent, exist_ok=True)
+    os.makedirs(png.parent, exist_ok=True)
     fig.savefig(pdf)
     fig.savefig(png, dpi=600)
     plt.close()
@@ -252,13 +260,15 @@ def plot_percent(args: PlotArgs) -> None:
 
 
 def plot_quality(args: PlotArgs) -> None:
-    plot_by_feat_quality(args.file, args.df, standardize=args.standardize, show=args.show)
+    plot_by_feat_quality(args.file, args.df, standardize=args.standardize, show=args.show, loess=args.loess)
 
 
 if __name__ == "__main__":
     args = []
-    args.extend([PlotArgs(file, df, show=True, standardize=True) for file, df in zip(JSONS, DFS)])
-    args.extend([PlotArgs(file, df, show=True, standardize=False) for file, df in zip(JSONS, DFS)])
+    args.extend([PlotArgs(file, df, show=False, standardize=True, loess=True) for file, df in zip(JSONS, DFS)])
+    args.extend([PlotArgs(file, df, show=False, standardize=False, loess=True) for file, df in zip(JSONS, DFS)])
+    args.extend([PlotArgs(file, df, show=False, standardize=True, loess=False) for file, df in zip(JSONS, DFS)])
+    args.extend([PlotArgs(file, df, show=False, standardize=False, loess=False) for file, df in zip(JSONS, DFS)])
     process_map(plot_quality, args, desc="Plotting")
     # for arg in args:
     #     plot_quality(arg)
