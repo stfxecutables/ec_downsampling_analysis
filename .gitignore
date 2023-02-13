@@ -2,10 +2,15 @@
 #                           Project-specific ignores                           #
 ################################################################################
 
-analysis/job_scripts
-analysis/results
+src/job_scripts
+src/results
 
 test_results
+
+data/heart_failure
+data/mimic-iv-ed-2.2
+data/uti_resistance
+data/*.zip
 
 
 
