@@ -8,6 +8,8 @@ sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
 import sys
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from time import strftime, time
 from typing import (
@@ -34,6 +36,8 @@ from pandas import DataFrame, Series
 from sklearn.ensemble import AdaBoostClassifier as AdaBoost
 from sklearn.ensemble import HistGradientBoostingClassifier as GBC
 from sklearn.ensemble import RandomForestClassifier as RF
+from sklearn.kernel_approximation import Nystroem
+from sklearn.kernel_approximation import RBFSampler as FourierApproximator
 from sklearn.linear_model import LogisticRegression as LR
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import StratifiedShuffleSplit as SSSplit
@@ -312,6 +316,91 @@ def load_mimic_iv() -> Tuple[DataFrame, Series]:
     return df, y
 
 
+class SGDHparams:
+    def __init__(
+        self,
+        eta0: float = 0.1,
+        alpha: float = 1e-4,
+        max_iter: int = 1500,
+        early_stopping: bool = False,
+    ) -> None:
+        self.loss = "log_loss"
+        self.max_iter = max_iter
+        self.shuffle = True
+        self.learning_rate = "adaptive"
+        self.eta0 = eta0
+        self.early_stopping = early_stopping
+        # self.alpha=1e-4,  # pretty decent
+        self.alpha = alpha  # mimic needs alpha < 1e-3, others benefit from >=1e-3
+
+    def as_dict(self) -> Dict[str, Any]:
+        return dict(
+            loss=self.loss,
+            max_iter=self.max_iter,
+            shuffle=self.shuffle,
+            learning_rate=self.learning_rate,
+            eta0=self.eta0,
+            early_stopping=self.early_stopping,
+            alpha=self.alpha,
+        )
+
+
+class ApproximateSVM(ABC):
+    """These all do well on diabetes130 with minimal tuning"""
+
+    def __init__(
+        self,
+        gamma: Optional[float] = None,
+        n_components: int = 100,
+        sgd: Optional[SGDHparams] = None,
+    ) -> None:
+        if sgd is None:
+            sgd = SGDHparams()
+        sgd.loss = "hinge"  # force implementation of linear SVM
+        # sgd.loss = "modified_huber"  # seems not good
+        # sgd.loss = "squared_hinge"  # no good
+        self.kernel_approximator: Union[Nystroem, FourierApproximator]
+        self.sgd_hps = sgd
+        self.classifier = SGDClassifier(**self.sgd_hps.as_dict())
+
+    def fit(self, X: DataFrame, y: Series) -> None:
+        Xt = self.kernel_approximator.fit_transform(X=X)
+        self.classifier.fit(Xt, y)
+
+    def score(self, X: DataFrame, y: Series) -> float:
+        Xt = self.kernel_approximator.fit_transform(X=X)
+        return float(self.classifier.score(Xt, y))
+
+
+class NystroemSVM(ApproximateSVM):
+    def __init__(
+        self,
+        gamma: Optional[float] = None,
+        n_components: int = 100,
+        sgd: Optional[SGDHparams] = None,
+    ) -> None:
+        super().__init__(gamma=gamma, n_components=n_components, sgd=sgd)
+        self.kernel_approximator = Nystroem(
+            kernel="rbf",
+            gamma=gamma,
+            n_components=n_components,
+        )
+
+
+class RandomFourierSVM(ApproximateSVM):
+    def __init__(
+        self,
+        gamma: Optional[float] = None,
+        n_components: int = 100,
+        sgd: Optional[SGDHparams] = None,
+    ) -> None:
+        super().__init__(gamma=gamma, n_components=n_components, sgd=sgd)
+        self.kernel_approximator = FourierApproximator(
+            gamma="scale" if gamma is None else gamma,  # type: ignore
+            n_components=n_components,
+        )
+
+
 if __name__ == "__main__":
     """
     ==============================================================================
@@ -410,32 +499,70 @@ if __name__ == "__main__":
     Fitting lr-sgd@N=160000 took: 41.07 s (i.e. 0.7 minutes). {acc=0.7106}
     Fitting lr-sgd@N=320000 took: 67.02 s (i.e. 1.1 minutes). {acc=0.7086}
     """
+    sgd = SGDHparams(eta0=1.0, alpha=1e-2, max_iter=1500, early_stopping=True)
+    svc_params = dict(gamma=1.0, n_components=500, sgd=sgd)
     classifiers = {
-        "lr-sgd": lambda: SGDClassifier(
-            loss="log_loss",
-            max_iter=1500,
-            shuffle=True,
-            learning_rate="adaptive",
-            eta0=0.1,
-            early_stopping=False,
-            # alpha=1e-4,  # pretty decent
-            alpha=1e-5,  # mimic needs alpha < 1e-3, others benefit from >=1e-3
-        ),
+        "svc-ny": lambda: NystroemSVM(**svc_params),
+        "svc-ks": lambda: RandomFourierSVM(**svc_params),
+        # "lr-sgd": lambda: SGDClassifier(
+        #     loss="log_loss",
+        #     max_iter=1500,
+        #     shuffle=True,
+        #     learning_rate="adaptive",
+        #     eta0=0.1,
+        #     early_stopping=False,
+        #     # alpha=1e-4,  # pretty decent
+        #     alpha=1e-5,  # mimic needs alpha < 1e-3, others benefit from >=1e-3
+        # ),
         # "lr": lambda: LR(solver="sag", max_iter=1000),  # O(n)
         # "rf": lambda: RF(n_jobs=1),
         # "gbt": lambda: GBC(),
         # "svc": lambda: SVC(),  # really bad this one
     }
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
-        "heart-failure": load_heart_failure,  # all instant
-        "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
+        # "heart-failure": load_heart_failure,  # all instant
+        # "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
         "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
+    bests = {
+        "heart-failure": {
+            "svc-ny": 0.5995,
+            "svc-ks": 0.5995,
+            "lr-sgd": 0.5995,
+            "lr": 0.5995,
+            "rf": 0.6443,
+            "gbt": 0.6567,
+        },
+        "diabetes-130": {
+            "svc-ny": 0.8885,
+            "svc-ks": 0.8885,
+            "lr-sgd": 0.8885,
+            "lr": 0.8885,
+            "rf": 0.8895,
+            "gbt": 0.8895,
+        },
+        "uti-resist": {
+            "svc-ny": 0.6705,
+            "svc-ks": 0.6705,
+            "lr-sgd": 0.6705,
+            "lr": 0.6705,
+            "rf": 0.6626,
+            "gbt": 0.6715,
+        },
+        "mimic-iv": {
+            "svc-ny": 0.7106,
+            "svc-ks": 0.7106,
+            "lr-sgd": 0.7106,
+            "lr": 0.7106,
+            "rf": 0.7320,
+            "gbt": 0.7434,
+        },
+    }
     for dsname, loader in datasets.items():
         for classifier, fitter in classifiers.items():
-            print("=" * 80)
-            print(f"Estimating runtimes for {dsname} with {classifier.upper()}")
+            # print("=" * 80)
+            # print(f"Estimating runtimes for {dsname} with {classifier.upper()}")
             X, y = loader()
             # N = min(5000, len(X))
             # N = min(80_000, len(X)) if dsname != "mimic-iv" else len(X)
@@ -452,12 +579,15 @@ if __name__ == "__main__":
                 start = time()
                 model.fit(X_tr, y_tr)
                 duration = time() - start
-                info = f"Fitting {classifier}@N={N} took:"
+                info = f"Fitting {classifier}@N={N} on {dsname:<10} took:"
                 runtime = f"{duration:0.2f} s (i.e. {duration / 60:0.1f} minutes). "
+                best = bests[dsname][classifier]
+                acc = model.score(X_test, y_test)
+                compare = "<" if acc < best else "=" if acc == best else ">"
                 print(
-                    f"{info:<35} "
+                    f"{info:<45} "
                     f"{runtime:>31}"
                     # f"[Finished at {strftime('%c')}]"
-                    f"{{acc={model.score(X_test, y_test):0.4f}}}"
+                    f"{{acc={acc:0.4f} {compare} {best:-.4f}}}"
                 )
                 N *= 2
