@@ -19,6 +19,7 @@ from sklearn.linear_model import LogisticRegression as LR
 from sklearn.neighbors import KNeighborsClassifier as KNN
 from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
+from tqdm import tqdm
 from typing_extensions import Literal
 
 from src.constants import DATA
@@ -132,6 +133,123 @@ def load_uti_resistance(
     return df, y
 
 
+def load_mimic_iv() -> Tuple[DataFrame, Series]:
+    """Could uses edstays.csv disposition == "EXPIRED" as a binary class
+    See https://icd.who.int/browse10/2019/en#/I to convert ICD-10 codes to
+    broad categories and
+    https://www2.gov.bc.ca/gov/content/health/practitioner-professional-resources/msp/physicians/diagnostic-code-descriptions-icd-9
+    for ICD-9
+
+    But probably better to use triage.csv data + demographic data to predict leave, admitted, expired
+
+    """
+    root = DATA / "mimic-iv-ed"
+    preproc = root / "preproc.json"
+    if preproc.exists():
+        # use the version that can be uploaded to CC safely
+        df = pd.read_json(preproc)
+        target = df["target"].copy()
+        df.drop(columns="target", inplace=True)
+        return df, target
+
+    triage = pd.read_csv(root / "triage.csv").rename(columns={"pain": "pain_sr"})
+    stays = pd.read_csv(root / "edstays.csv")
+    drops = ["subject_id_x", "subject_id_y", "hadm_id", "stay_id", "intime", "outtime"]
+    cat_cols = ["gender", "race", "arrival_transport"]
+    y_cats = {
+        # 0 = will be untreated
+        # 1 = receives urgent care
+        # 2 = seen, but not critical
+        "left without being seen": 0,
+        "left against medical advice": 0,
+        "eloped": 0,
+        "admitted": 1,  # "urgent treatment"
+        "transfer": 1,  # "urgent treatment"
+        "home": 2,
+        "expired": 3,
+        "other": 4,
+    }
+    # 30 most common entries for triage "pain" column. My conversions here are
+    # not psychometrically valid at all, but will have to do
+    pains = {
+        "0": 0.0,
+        "0.5": 0.5,
+        "1": 1.0,
+        "1-2": 1.5,
+        "2": 2.0,
+        "3": 3.0,
+        "3-4": 3.5,
+        "4": 4,
+        "4-5": 4.5,
+        "5": 5.0,
+        "5-6": 5.5,
+        "6": 6.0,
+        "6-7": 6.5,
+        "7": 7.0,
+        "7-8": 7.5,
+        "8": 8.0,
+        "8-9": 8.5,
+        "8.5": 8.5,
+        "9": 9.0,
+        "9.5": 9.5,
+        "10": 10.0,
+        "10 ": 10.0,
+        "11": 11.0,
+        "12": 12.0,
+        "13": 13.0,
+        "20": 20.0,
+        "Critical": 20.0,
+        "denies": 0.0,
+    }
+
+    # this is still about 93.8% of the triage data
+    pain_idx = triage["pain_sr"].apply(lambda x: x in pains)  # numeric pains
+    triage = triage.loc[pain_idx]
+    triage["pain_sr"] = triage["pain_sr"].apply(lambda x: pains[x])
+    stays = stays[pain_idx]
+
+    df = pd.merge(triage, stays, on="stay_id", how="inner")
+    df.drop(columns=drops, inplace=True)
+    df.dropna(axis=0, inplace=True)
+    y = df["disposition"].str.lower().apply(lambda s: y_cats[s])
+
+    # reduce to most common cases
+    idx = y <= 2
+    df = df.loc[idx].copy()
+    y = y[idx].copy()
+
+    complaints = df.chiefcomplaint.str.lower()
+    df.drop(columns="chiefcomplaint", inplace=True)
+    cats = df.loc[:, cat_cols].copy()
+    df.drop(columns=cat_cols, inplace=True)
+    df.drop(columns="disposition", inplace=True)
+    # just some of most common words included in "complaint" column, reducing some replicates
+    # fmt: off
+    words = [
+        "abd", "abnormal", "allergic", "ankle", "anxiety", "arm", "back", "bleeding",
+        "body", "brbpr", "changes", "chest", "cough", "cough,", "diarrhea", "dizziness",
+        "dyspnea", "dysuria", "ear", "epigastric", "etoh", "eval", "eye", "facial",
+        "fall", "fever", "finger", "flank", "foot", "hand", "head", "headache",
+        "hematuria", "hip", "hypertension", "ili", "injury", "knee", "labs", "laceration",
+        "left", "leg", "llq", "lower", "mental", "mvc", "n/v", "nausea", "neck",
+        "numbness", "pain", "palpitations", "rash", "reaction", "right", "seizure",
+        "shoulder", "sore", "swelling", "syncope", "throat", "transfer", "unable",
+        "urinary", "vaginal", "visual", "vomiting", "weakness", "wound", "wrist"
+    ]
+    # fmt: on
+    word_cols = []
+    for word in tqdm(words, desc="Converting complaints to one-hot"):
+        word_cols.append(Series(complaints.apply(lambda s: int(word in s)), name=word))
+    complaints = pd.concat(word_cols, axis=1)
+    cats = pd.get_dummies(cats)
+    df = pd.concat([df, cats, complaints], axis=1)
+    js = df.copy()
+    js["target"] = y
+    js.to_json(preproc)
+
+    return df, y
+
+
 KNN1_ARGS = dict(n_neighbors=1)
 KNN3_ARGS = dict(n_neighbors=3)
 KNN5_ARGS = dict(n_neighbors=5)
@@ -154,4 +272,4 @@ CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
 OUTDIR = Path(__file__).resolve().parent / "results"
 
 if __name__ == "__main__":
-    load_uti_resistance()
+    X, y = load_mimic_iv()
