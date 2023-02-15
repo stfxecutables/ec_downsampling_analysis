@@ -314,7 +314,9 @@ def load_mimic_iv() -> Tuple[DataFrame, Series]:
 
 if __name__ == "__main__":
     classifiers = {
-        "lr": lambda: LR(solver="sag", max_iter=1000), # time seems to double with sample double, O(n)
+        "lr": lambda: LR(
+            solver="sag", max_iter=1000
+        ),  # time seems to double with sample double, O(n)
         # "rf": lambda: RF(n_jobs=1),
         # "gbt": lambda: GBC(),
         # "svc": lambda: SVC(),  # really bad this one
@@ -326,41 +328,62 @@ if __name__ == "__main__":
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
     """
-    ================================================================================
+    ==============================================================================
     Estimating runtimes for heart-failure with RF
-    Fitting rf@N=2008 took:  0.74 s (i.e. 0.0 minutes).  {acc=0.6443}
-    ================================================================================
+    Fitting rf@N=2008 took:  0.74 s (i.e. 0.0 minutes).   {acc=0.6443}
+    ------------------------------------------------------------------------------
     Estimating runtimes for heart-failure with GBT
-    Fitting gbt@N=2008 took: 0.97 s (i.e. 0.0 minutes). {acc=0.6567}
-    ================================================================================
+    Fitting gbt@N=2008 took: 0.97 s (i.e. 0.0 minutes).   {acc=0.6567}
+    ------------------------------------------------------------------------------
+    Estimating runtimes for heart-failure with LR
+    Fitting lr@N=2008 took:  1.67 s (i.e. 0.0 minutes).   {acc=0.5995} - ConvergenceWarning
+
+    ==============================================================================
     Estimating runtimes for diabetes-130 with RF
     Fitting rf@N=5000 took:   0.36 s (i.e. 0.0 minutes).  {acc=0.8890}
     Fitting rf@N=10000 took:  0.69 s (i.e. 0.0 minutes).  {acc=0.8860}
     Fitting rf@N=20000 took:  1.37 s (i.e. 0.0 minutes).  {acc=0.8860}
     Fitting rf@N=40000 took:  2.82 s (i.e. 0.0 minutes).  {acc=0.8894}
     Fitting rf@N=80000 took:  5.94 s (i.e. 0.1 minutes).  {acc=0.8873}
-    ================================================================================
+    ------------------------------------------------------------------------------
     Estimating runtimes for diabetes-130 with GBT
     Fitting gbt@N=5000 took:  1.12 s (i.e. 0.0 minutes).  {acc=0.8960}
     Fitting gbt@N=10000 took: 1.28 s (i.e. 0.0 minutes).  {acc=0.8835}
     Fitting gbt@N=20000 took: 0.72 s (i.e. 0.0 minutes).  {acc=0.8895}
     Fitting gbt@N=40000 took: 0.79 s (i.e. 0.0 minutes).  {acc=0.8890}
     Fitting gbt@N=80000 took: 1.40 s (i.e. 0.0 minutes).  {acc=0.8890}
-    ================================================================================
+    ------------------------------------------------------------------------------
+    Estimating runtimes for diabetes-130 with LR
+    Fitting lr@N=5000 took:   1.49 s (i.e. 0.0 minutes).  {acc=0.8870} - ConvergenceWarning
+    Fitting lr@N=10000 took:  3.03 s (i.e. 0.1 minutes).  {acc=0.8870} - ConvergenceWarning
+    Fitting lr@N=20000 took:  3.85 s (i.e. 0.1 minutes).  {acc=0.8882}
+    Fitting lr@N=40000 took:  6.41 s (i.e. 0.1 minutes).  {acc=0.8885}
+    Fitting lr@N=80000 took:  5.44 s (i.e. 0.1 minutes).  {acc=0.8883}
+
+    ==============================================================================
     Estimating runtimes for uti-resist with RF
     Fitting rf@N=5000 took:   1.07 s (i.e. 0.0 minutes).  {acc=0.6070}
     Fitting rf@N=10000 took:  3.05 s (i.e. 0.1 minutes).  {acc=0.6625}
     Fitting rf@N=20000 took:  7.51 s (i.e. 0.1 minutes).  {acc=0.6585}
     Fitting rf@N=40000 took: 15.96 s (i.e. 0.3 minutes).  {acc=0.6626}
     Fitting rf@N=80000 took: 35.64 s (i.e. 0.6 minutes).  {acc=0.6613}
-    ================================================================================
+    ------------------------------------------------------------------------------
     Estimating runtimes for uti-resist with GBT
-    Fitting gbt@N=5000 took:   5.03 s (i.e. 0.1 minutes).  {acc=0.6570}
-    Fitting gbt@N=10000 took:  6.34 s (i.e. 0.1 minutes).  {acc=0.6540}
-    Fitting gbt@N=20000 took:  3.54 s (i.e. 0.1 minutes).  {acc=0.6645}
-    Fitting gbt@N=40000 took:  6.88 s (i.e. 0.1 minutes).  {acc=0.6715}
-    Fitting gbt@N=80000 took: 13.51 s (i.e. 0.2 minutes).  {acc=0.6693}
-    ================================================================================
+    Fitting gbt@N=5000 took:   5.03 s (i.e. 0.1 minutes). {acc=0.6570}
+    Fitting gbt@N=10000 took:  6.34 s (i.e. 0.1 minutes). {acc=0.6540}
+    Fitting gbt@N=20000 took:  3.54 s (i.e. 0.1 minutes). {acc=0.6645}
+    Fitting gbt@N=40000 took:  6.88 s (i.e. 0.1 minutes). {acc=0.6715}
+    Fitting gbt@N=80000 took: 13.51 s (i.e. 0.2 minutes). {acc=0.6693}
+    ------------------------------------------------------------------------------
+    Estimating runtimes for uti-resist with LR
+    Fitting lr@N=5000 took:   20.64 s (i.e. 0.3 minutes). {acc=0.6430} - ConvergenceWarning
+    Fitting lr@N=10000 took:  41.67 s (i.e. 0.7 minutes). {acc=0.6695} - ConvergenceWarning
+    Fitting lr@N=20000 took:  84.40 s (i.e. 1.4 minutes). {acc=0.6577} - ConvergenceWarning
+    Fitting lr@N=40000 took: 185.79 s (i.e. 3.1 minutes). {acc=0.6569} - ConvergenceWarning
+    Fitting lr@N=80000 took: 364.93 s (i.e. 6.1 minutes). {acc=0.6705} - ConvergenceWarning
+
+
+    ==============================================================================
     Estimating runtimes for mimic-iv with RF
     Fitting rf@N=5000 took:    0.53 s (i.e. 0.0 minutes).  {acc=0.7120}
     Fitting rf@N=10000 took:   1.08 s (i.e. 0.0 minutes).  {acc=0.7260}
@@ -369,7 +392,7 @@ if __name__ == "__main__":
     Fitting rf@N=80000 took:  10.51 s (i.e. 0.2 minutes).  {acc=0.7298}
     Fitting rf@N=160000 took: 24.24 s (i.e. 0.4 minutes).  {acc=0.7263}
     Fitting rf@N=320000 took: 58.42 s (i.e. 1.0 minutes).  {acc=0.7320}
-    ================================================================================
+    ------------------------------------------------------------------------------
     Estimating runtimes for mimic-iv with GBT
     Fitting gbt@N=5000 took:    2.70 s (i.e. 0.0 minutes). {acc=0.7080}
     Fitting gbt@N=10000 took:   2.97 s (i.e. 0.0 minutes). {acc=0.7100}
