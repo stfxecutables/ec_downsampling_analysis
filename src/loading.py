@@ -10,19 +10,7 @@ sys.path.append(str(ROOT))  # isort: skip
 import sys
 from pathlib import Path
 from time import strftime, time
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    Union,
-    cast,
-    no_type_check,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union, cast, no_type_check
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -105,13 +93,45 @@ def load_heart_failure() -> Tuple[DataFrame, Series]:
         "re.admission.within.6.months",
         "time.of.death..days.from.admission.",
         "outcome.during.hospitalization",
+        "return.to.emergency.department.within.6.months",
+        "time.to.emergency.department.within.6.months",
         "DestinationDischarge",
+        # all NaN for below features
+        "cholinesterase",
+        "body.temperature.blood.gas",
     ]
     target = "re.admission.within.6.months"
-    df = pd.read_csv(source)
-    target = df[target]
+    df = pd.read_csv(source).iloc[:, 2:]
+    y = df[target].copy()
     df = df.drop(columns=drops)
-    return df, target
+    # about a quarter of features are half-null
+    ord_cols = ["ageCat"]
+    bool_cols = [
+        "admission.way",
+        "gender",
+        "type.II.respiratory.failure",
+        "oxygen.inhalation",
+    ]
+    age_bins = {
+        "(89,110]": 7.0,
+        "(79,89]": 6.0,
+        "(69,79]": 5.0,
+        "(59,69]": 4.0,
+        "(49,59]": 3.0,
+        "(39,49]": 2.0,
+        "(29,39]": 1.0,
+        "(21,29]": 0.0,
+    }
+
+    cats = df.select_dtypes("object").drop(columns=ord_cols + bool_cols)
+    bools = df.select_dtypes("object").loc[:, bool_cols]
+    cats = pd.get_dummies(cats)
+    bools = pd.get_dummies(bools).iloc[:, ::2]
+    floats = df.select_dtypes("float")
+    floats["age"] = df["ageCat"].apply(lambda a: age_bins[a])
+    floats.fillna(floats.median(), inplace=True)
+    df = pd.concat([floats, cats, bools], axis=1)
+    return df, y
 
 
 def load_diabetes130() -> Tuple[DataFrame, Series]:
@@ -304,7 +324,7 @@ if __name__ == "__main__":
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
         # "mimic-iv": load_mimic_iv,  # about 1min max but not enough iters
         # "uti-resist": load_uti_resistance,  # about 40s?
-        "diabetes-130": load_diabetes130,
+        # "diabetes-130": load_diabetes130,  # very fast
         "heart-failure": load_heart_failure,
     }
     for dsname, loader in datasets.items():
