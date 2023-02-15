@@ -10,7 +10,19 @@ sys.path.append(str(ROOT))  # isort: skip
 import sys
 from pathlib import Path
 from time import strftime, time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union, cast, no_type_check
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+    no_type_check,
+)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,10 +32,11 @@ from matplotlib.figure import Figure
 from numpy import ndarray
 from pandas import DataFrame, Series
 from sklearn.ensemble import AdaBoostClassifier as AdaBoost
+from sklearn.ensemble import HistGradientBoostingClassifier as GBC
 from sklearn.ensemble import RandomForestClassifier as RF
 from sklearn.linear_model import LogisticRegression as LR
 from sklearn.linear_model import SGDClassifier
-from sklearn.neighbors import KNeighborsClassifier as KNN
+from sklearn.model_selection import StratifiedShuffleSplit as SSSplit
 from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC, LinearSVC
 from tqdm import tqdm
@@ -299,46 +312,95 @@ def load_mimic_iv() -> Tuple[DataFrame, Series]:
     return df, y
 
 
-KNN1_ARGS = dict(n_neighbors=1)
-KNN3_ARGS = dict(n_neighbors=3)
-KNN5_ARGS = dict(n_neighbors=5)
-KNN10_ARGS = dict(n_neighbors=10)
-LR_ARGS = dict(solver="liblinear")  # small datasets
-SVC_ARGS = dict()
-RF_ARGS = dict()
-ADA_ARGS = dict()
-
-CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
-    "KNN-1": (KNN, KNN1_ARGS),
-    "KNN-3": (KNN, KNN3_ARGS),
-    "KNN-5": (KNN, KNN5_ARGS),
-    "KNN-10": (KNN, KNN10_ARGS),
-    "Logistic Regression": (LR, LR_ARGS),
-    "SVM": (SVC, SVC_ARGS),
-    "Random Forest": (RF, RF_ARGS),
-    "AdaBoosted DTree": (AdaBoost, ADA_ARGS),
-}
-OUTDIR = Path(__file__).resolve().parent / "results"
-
 if __name__ == "__main__":
-    datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
-        # "mimic-iv": load_mimic_iv,  # about 1min max but not enough iters
-        # "uti-resist": load_uti_resistance,  # about 40s?
-        # "diabetes-130": load_diabetes130,  # very fast
-        "heart-failure": load_heart_failure,
+    classifiers = {
+        "lr": lambda: LR(solver="sag", max_iter=1000), # time seems to double with sample double, O(n)
+        # "rf": lambda: RF(n_jobs=1),
+        # "gbt": lambda: GBC(),
+        # "svc": lambda: SVC(),  # really bad this one
     }
+    datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
+        "heart-failure": load_heart_failure,  # all instant
+        "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
+        "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
+        "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
+    }
+    """
+    ================================================================================
+    Estimating runtimes for heart-failure with RF
+    Fitting rf@N=2008 took:  0.74 s (i.e. 0.0 minutes).  {acc=0.6443}
+    ================================================================================
+    Estimating runtimes for heart-failure with GBT
+    Fitting gbt@N=2008 took: 0.97 s (i.e. 0.0 minutes). {acc=0.6567}
+    ================================================================================
+    Estimating runtimes for diabetes-130 with RF
+    Fitting rf@N=5000 took:   0.36 s (i.e. 0.0 minutes).  {acc=0.8890}
+    Fitting rf@N=10000 took:  0.69 s (i.e. 0.0 minutes).  {acc=0.8860}
+    Fitting rf@N=20000 took:  1.37 s (i.e. 0.0 minutes).  {acc=0.8860}
+    Fitting rf@N=40000 took:  2.82 s (i.e. 0.0 minutes).  {acc=0.8894}
+    Fitting rf@N=80000 took:  5.94 s (i.e. 0.1 minutes).  {acc=0.8873}
+    ================================================================================
+    Estimating runtimes for diabetes-130 with GBT
+    Fitting gbt@N=5000 took:  1.12 s (i.e. 0.0 minutes).  {acc=0.8960}
+    Fitting gbt@N=10000 took: 1.28 s (i.e. 0.0 minutes).  {acc=0.8835}
+    Fitting gbt@N=20000 took: 0.72 s (i.e. 0.0 minutes).  {acc=0.8895}
+    Fitting gbt@N=40000 took: 0.79 s (i.e. 0.0 minutes).  {acc=0.8890}
+    Fitting gbt@N=80000 took: 1.40 s (i.e. 0.0 minutes).  {acc=0.8890}
+    ================================================================================
+    Estimating runtimes for uti-resist with RF
+    Fitting rf@N=5000 took:   1.07 s (i.e. 0.0 minutes).  {acc=0.6070}
+    Fitting rf@N=10000 took:  3.05 s (i.e. 0.1 minutes).  {acc=0.6625}
+    Fitting rf@N=20000 took:  7.51 s (i.e. 0.1 minutes).  {acc=0.6585}
+    Fitting rf@N=40000 took: 15.96 s (i.e. 0.3 minutes).  {acc=0.6626}
+    Fitting rf@N=80000 took: 35.64 s (i.e. 0.6 minutes).  {acc=0.6613}
+    ================================================================================
+    Estimating runtimes for uti-resist with GBT
+    Fitting gbt@N=5000 took:   5.03 s (i.e. 0.1 minutes).  {acc=0.6570}
+    Fitting gbt@N=10000 took:  6.34 s (i.e. 0.1 minutes).  {acc=0.6540}
+    Fitting gbt@N=20000 took:  3.54 s (i.e. 0.1 minutes).  {acc=0.6645}
+    Fitting gbt@N=40000 took:  6.88 s (i.e. 0.1 minutes).  {acc=0.6715}
+    Fitting gbt@N=80000 took: 13.51 s (i.e. 0.2 minutes).  {acc=0.6693}
+    ================================================================================
+    Estimating runtimes for mimic-iv with RF
+    Fitting rf@N=5000 took:    0.53 s (i.e. 0.0 minutes).  {acc=0.7120}
+    Fitting rf@N=10000 took:   1.08 s (i.e. 0.0 minutes).  {acc=0.7260}
+    Fitting rf@N=20000 took:   2.18 s (i.e. 0.0 minutes).  {acc=0.7185}
+    Fitting rf@N=40000 took:   4.54 s (i.e. 0.1 minutes).  {acc=0.7325}
+    Fitting rf@N=80000 took:  10.51 s (i.e. 0.2 minutes).  {acc=0.7298}
+    Fitting rf@N=160000 took: 24.24 s (i.e. 0.4 minutes).  {acc=0.7263}
+    Fitting rf@N=320000 took: 58.42 s (i.e. 1.0 minutes).  {acc=0.7320}
+    ================================================================================
+    Estimating runtimes for mimic-iv with GBT
+    Fitting gbt@N=5000 took:    2.70 s (i.e. 0.0 minutes). {acc=0.7080}
+    Fitting gbt@N=10000 took:   2.97 s (i.e. 0.0 minutes). {acc=0.7100}
+    Fitting gbt@N=20000 took:   1.56 s (i.e. 0.0 minutes). {acc=0.7358}
+    Fitting gbt@N=40000 took:   1.93 s (i.e. 0.0 minutes). {acc=0.7328}
+    Fitting gbt@N=80000 took:   6.50 s (i.e. 0.1 minutes). {acc=0.7434}
+    Fitting gbt@N=160000 took: 12.47 s (i.e. 0.2 minutes). {acc=0.7374}
+    Fitting gbt@N=320000 took: 19.91 s (i.e. 0.3 minutes). {acc=0.7413}
+    """
     for dsname, loader in datasets.items():
-        print("=" * 80)
-        print(f"Estimating runtimes for {dsname}")
-        X, y = loader()
-        N = min(5000, len(X))
-        while N <= len(X):
-            idx = np.random.permutation(len(X))[:N]
-            Xm, ym = X.iloc[idx, :], y.iloc[idx]
-            lr = LR(solver="sag")
-            print(f"Starting fit for N={N} samples at {strftime('%c')}")
-            start = time()
-            lr.fit(Xm, ym)
-            duration = time() - start
-            print(f"Fitting LR@N={N} took: {duration} s (i.e. {duration / 60} minutes)")
-            N *= 2
+        for classifier, fitter in classifiers.items():
+            print("=" * 80)
+            print(f"Estimating runtimes for {dsname} with {classifier.upper()}")
+            X, y = loader()
+            N = min(5000, len(X))
+            while N <= len(X):
+                idx = np.random.permutation(len(X))[:N]
+                Xm, ym = X.iloc[idx, :], y.iloc[idx]
+                splitter = SSSplit(n_splits=1, test_size=0.2)
+                idx_train, idx_test = next(splitter.split(Xm, ym))
+                X_tr, y_tr = Xm.iloc[idx_train], ym.iloc[idx_train]
+                X_test, y_test = Xm.iloc[idx_test], ym.iloc[idx_test]
+                model = fitter()
+                # print(f"Starting fit for N={N} samples at ")
+                start = time()
+                model.fit(X_tr, y_tr)
+                duration = time() - start
+                print(
+                    f"Fitting {classifier}@N={N} took: {duration:0.2f} s "
+                    f"(i.e. {duration / 60:0.1f} minutes). "
+                    f"[Finished at {strftime('%c')}]"
+                    f"{{acc={model.score(X_test, y_test):0.4f}}}"
+                )
+                N *= 2
