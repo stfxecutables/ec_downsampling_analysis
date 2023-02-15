@@ -17,7 +17,9 @@ from sklearn.ensemble import AdaBoostClassifier as AdaBoost
 from sklearn.ensemble import RandomForestClassifier as RF
 from sklearn.linear_model import LogisticRegression as LR
 from sklearn.neighbors import KNeighborsClassifier as KNN
+from sklearn.preprocessing import LabelEncoder
 from sklearn.svm import SVC
+from typing_extensions import Literal
 
 from src.constants import DATA
 
@@ -92,6 +94,44 @@ def load_heart_failure() -> Tuple[DataFrame, Series]:
     return df, target
 
 
+def load_diabetes130() -> Tuple[DataFrame, Series]:
+    source = DATA / "diabetes130.csv"
+    target = "readmit_30_days"
+    df = pd.read_csv(source)
+    target = df[target]
+    df = df.drop(columns=target)
+    # TODO: one-hot encode categoricals
+    return df, target
+
+
+def load_uti_resistance(
+    style: Literal["binary", "ordinal", "multi"]
+) -> Tuple[DataFrame, Series]:
+    features = pd.read_csv(DATA / "uti_resistance/all_uti_features.csv")
+    labels = pd.read_csv(DATA / "uti_resistance/all_uti_resist_labels.csv")
+    # prescs = DATA / "uti_resitance/all_prescriptions.csv" not needed
+    drops = ["is_train", "uncomplicated", "example_id"]
+    targets = ["NIT", "SXT", "CIP", "LVX"]
+    # could do one for each, or combine to get "any resistance"
+    df = pd.merge(features.drop(columns=drops[:-1]), labels, on="example_id", how="inner")
+    df.dropna(axis=0, inplace=True)
+    df_targets = df.loc[:, targets].copy()
+    df.drop(columns=[*targets, *drops], inplace=True)
+    if style == "binary":
+        y = df_targets.any(axis=1).astype(int)
+    elif style == "ordinal":
+        y = df_targets.sum(axis=1).astype(int)
+    elif "multi" in style:
+        y_str = (
+            df_targets.NIT.apply(str)
+            + df_targets.SXT.apply(str)
+            + df_targets.CIP.apply(str)
+            + df_targets.LVX.apply(str)
+        )
+        y = LabelEncoder().fit_transform(y_str)
+    return df, y
+
+
 KNN1_ARGS = dict(n_neighbors=1)
 KNN3_ARGS = dict(n_neighbors=3)
 KNN5_ARGS = dict(n_neighbors=5)
@@ -112,3 +152,6 @@ CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
     "AdaBoosted DTree": (AdaBoost, ADA_ARGS),
 }
 OUTDIR = Path(__file__).resolve().parent / "results"
+
+if __name__ == "__main__":
+    load_uti_resistance()
