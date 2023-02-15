@@ -7,18 +7,37 @@ ROOT = Path(__file__).resolve().parent.parent  # isort: skip
 sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
-
+import sys
 from pathlib import Path
-from typing import Dict, Tuple, Type
+from time import strftime, time
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+    no_type_check,
+)
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy import ndarray
 from pandas import DataFrame, Series
 from sklearn.ensemble import AdaBoostClassifier as AdaBoost
 from sklearn.ensemble import RandomForestClassifier as RF
 from sklearn.linear_model import LogisticRegression as LR
+from sklearn.linear_model import SGDClassifier
 from sklearn.neighbors import KNeighborsClassifier as KNN
 from sklearn.preprocessing import LabelEncoder
-from sklearn.svm import SVC
+from sklearn.svm import SVC, LinearSVC
 from tqdm import tqdm
 from typing_extensions import Literal
 
@@ -99,14 +118,24 @@ def load_diabetes130() -> Tuple[DataFrame, Series]:
     source = DATA / "diabetes130.csv"
     target = "readmit_30_days"
     df = pd.read_csv(source)
-    target = df[target]
-    df = df.drop(columns=target)
+    y = df.loc[:, target].copy()
+    df.drop(columns=target, inplace=True)
+    ages = {"30 years or younger": 0, "30-60 years": 1, "Over 60 years": 2}
+    bools = df.select_dtypes("bool").astype(int)
+    bools["diabetesMed"] = df["diabetesMed"].apply(lambda x: 0 if x == "No" else 1)
+    bools["change"] = df["change"].apply(lambda x: 0 if x == "No" else 1)
+    cats = df.select_dtypes("object").drop(columns=["age", "diabetesMed", "change"])
+    cats = pd.get_dummies(cats)
+    ords = df.select_dtypes("int64")
+    ords["age"] = df["age"].apply(lambda age: ages[age])
+    df = pd.concat([ords, cats, bools], axis=1)
+
     # TODO: one-hot encode categoricals
-    return df, target
+    return df, y
 
 
 def load_uti_resistance(
-    style: Literal["binary", "ordinal", "multi"]
+    style: Literal["binary", "ordinal", "multi"] = "binary"
 ) -> Tuple[DataFrame, Series]:
     features = pd.read_csv(DATA / "uti_resistance/all_uti_features.csv")
     labels = pd.read_csv(DATA / "uti_resistance/all_uti_resist_labels.csv")
@@ -272,4 +301,24 @@ CLASSIFIERS: Dict[str, Tuple[Type, Dict]] = {
 OUTDIR = Path(__file__).resolve().parent / "results"
 
 if __name__ == "__main__":
-    X, y = load_mimic_iv()
+    datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
+        # "mimic-iv": load_mimic_iv,  # about 1min max but not enough iters
+        # "uti-resist": load_uti_resistance,  # about 40s?
+        "diabetes-130": load_diabetes130,
+        "heart-failure": load_heart_failure,
+    }
+    for dsname, loader in datasets.items():
+        print("=" * 80)
+        print(f"Estimating runtimes for {dsname}")
+        X, y = loader()
+        N = min(5000, len(X))
+        while N <= len(X):
+            idx = np.random.permutation(len(X))[:N]
+            Xm, ym = X.iloc[idx, :], y.iloc[idx]
+            lr = LR(solver="sag")
+            print(f"Starting fit for N={N} samples at {strftime('%c')}")
+            start = time()
+            lr.fit(Xm, ym)
+            duration = time() - start
+            print(f"Fitting LR@N={N} took: {duration} s (i.e. {duration / 60} minutes)")
+            N *= 2
