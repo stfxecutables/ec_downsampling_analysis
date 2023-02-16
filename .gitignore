@@ -9,6 +9,7 @@ data/heart_failure
 data/mimic-iv-ed-2.2
 data/uti_resistance
 data/*.zip
+data/*preprocessed.json
 
 
 
