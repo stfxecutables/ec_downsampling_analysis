@@ -30,6 +30,8 @@ from typing import (
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# from lightgbm import LGBMClassifier
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
@@ -46,6 +48,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC, LinearSVC
 from tqdm import tqdm
 from typing_extensions import Literal
+from xgboost import XGBClassifier, XGBRFClassifier
 
 from src.constants import DATA
 
@@ -397,27 +400,6 @@ class ApproximateSVM(ABC):
         return float(self.classifier.score(Xt, y))
 
 
-class NystroemSVM(ApproximateSVM):
-    def __init__(
-        self,
-        gamma: Optional[float] = None,
-        n_components: int = 100,
-        sgd: Optional[SGDHparams] = None,
-    ) -> None:
-        super().__init__(gamma=gamma, n_components=n_components, sgd=sgd)
-
-    def fit(self, X: DataFrame, y: Series) -> None:
-        if X.shape[1] < self.n_components:
-            self.n_components = X.shape[1]
-        self.kernel_approximator = Nystroem(
-            kernel="rbf",
-            gamma=self.gamma,
-            n_components=self.n_components,
-        )
-        Xt = self.kernel_approximator.fit_transform(X=X)
-        self.classifier.fit(Xt, y)
-
-
 class RandomFourierSVM(ApproximateSVM):
     def __init__(
         self,
@@ -539,8 +521,11 @@ if __name__ == "__main__":
     sgd = SGDHparams(eta0=1.0, alpha=1e-2, max_iter=1500, early_stopping=True)
     svc_params = dict(gamma=1.0, n_components=500, sgd=sgd)
     classifiers = {
-        "svc-ny": lambda: NystroemSVM(**svc_params),
-        "svc-ks": lambda: RandomFourierSVM(**svc_params),
+        # "lgb": lambda: LGBMClassifier(n_jobs=1),
+        # "xgb": lambda: XGBClassifier(tree_method="hist", n_jobs=1),
+        "xrf": lambda: XGBRFClassifier(tree_method="hist", n_jobs=1),
+        # "svc-ny": lambda: NystroemSVM(**svc_params),
+        # "svc-ks": lambda: RandomFourierSVM(**svc_params),
         # "lr-sgd": lambda: SGDClassifier(
         #     loss="log_loss",
         #     max_iter=1500,
@@ -552,18 +537,18 @@ if __name__ == "__main__":
         #     alpha=1e-5,  # mimic needs alpha < 1e-3, others benefit from >=1e-3
         # ),
         # "lr": lambda: LR(solver="sag", max_iter=1000),  # O(n)
-        # "rf": lambda: RF(n_jobs=1),
+        "rf": lambda: RF(n_jobs=1),
         # "gbt": lambda: GBC(),
         # "svc": lambda: SVC(),  # really bad this one
     }
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
-        # "diabetes": load_diabetes,
-        # "park": load_park,
-        # "trans": load_trans,
-        # "spect": load_SPECT,
-        # "heart-failure": load_heart_failure,  # all instant
-        # "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
-        # "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
+        "diabetes": load_diabetes,
+        "park": load_park,
+        "trans": load_trans,
+        "spect": load_SPECT,
+        "heart-failure": load_heart_failure,  # all instant
+        "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
+        "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
     bests = {
@@ -573,7 +558,10 @@ if __name__ == "__main__":
             "lr-sgd": 0.0,
             "lr": 0.0,
             "rf": 0.0,
-            "gbt": 0.0,
+            "gbt": 0.6429,
+            "xgb": 0.6429,
+            "lgb": 0.6429,
+            "xrf": 0.6429,
         },
         "park": {
             "svc-ny": 0.0,
@@ -581,7 +569,10 @@ if __name__ == "__main__":
             "lr-sgd": 0.0,
             "lr": 0.0,
             "rf": 0.0,
-            "gbt": 0.0,
+            "gbt": 0.9487,
+            "xgb": 0.9487,
+            "lgb": 0.9487,
+            "xrf": 0.9487,
         },
         "trans": {
             "svc-ny": 0.0,
@@ -589,7 +580,10 @@ if __name__ == "__main__":
             "lr-sgd": 0.0,
             "lr": 0.0,
             "rf": 0.0,
-            "gbt": 0.0,
+            "gbt": 0.7533,
+            "xgb": 0.7533,
+            "lgb": 0.7533,
+            "xrf": 0.7533,
         },
         "spect": {
             "svc-ny": 0.0,
@@ -597,7 +591,10 @@ if __name__ == "__main__":
             "lr-sgd": 0.0,
             "lr": 0.0,
             "rf": 0.0,
-            "gbt": 0.0,
+            "gbt": 0.7593,
+            "xgb": 0.7593,
+            "lgb": 0.7593,
+            "xrf": 0.7593,
         },
         "heart-failure": {
             "svc-ny": 0.5995,
@@ -606,6 +603,9 @@ if __name__ == "__main__":
             "lr": 0.5995,
             "rf": 0.6443,
             "gbt": 0.6567,
+            "xgb": 0.6393,
+            "lgb": 0.6393,
+            "xrf": 0.6393,
         },
         "diabetes-130": {
             "svc-ny": 0.8885,
@@ -614,6 +614,9 @@ if __name__ == "__main__":
             "lr": 0.8885,
             "rf": 0.8895,
             "gbt": 0.8895,
+            "xgb": 0.8877,
+            "lgb": 0.8877,
+            "xrf": 0.8877,
         },
         "uti-resist": {
             "svc-ny": 0.6705,
@@ -622,6 +625,9 @@ if __name__ == "__main__":
             "lr": 0.6705,
             "rf": 0.6626,
             "gbt": 0.6715,
+            "xgb": 0.6715,
+            "lgb": 0.6715,
+            "xrf": 0.6715,
         },
         "mimic-iv": {
             "svc-ny": 0.7106,
@@ -630,6 +636,9 @@ if __name__ == "__main__":
             "lr": 0.7106,
             "rf": 0.7320,
             "gbt": 0.7434,
+            "xgb": 0.7434,
+            "lgb": 0.7434,
+            "xrf": 0.7434,
         },
     }
 

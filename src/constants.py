@@ -54,6 +54,19 @@ PERCENTS = np.linspace(0, 1, 21)[1:-1]  # 5, 10, ..., 95
 COLS = [f"{e:1.0f}" for e in PERCENTS * 100]
 N_ROWS = len(COLS) * REPS_PER_PERCENT
 
+# hparam defaults
+LR_LR_INIT_DEFAULT = 1e-2
+LR_WD_DEFAULT = 0
+
+MLP_LR_INIT_DEFAULT = 3e-4
+MLP_WD_DEFAULT = 1e-4
+DROPOUT_DEFAULT = 0.1
+MLP_WIDTH_DEFAULT = 512
+
+SKLEARN_SGD_LR_MIN = 1e-6
+SKLEARN_SGD_LR_MAX = 1.0
+SKLEARN_SGD_LR_DEFAULT = 1e-3
+
 
 DATASET_NAMES = ["Diabetes", "Transfusion", "Parkinsons", "SPECT"]
 KNN1_ARGS = {name: dict(n_neighbors=1) for name in DATASET_NAMES}
