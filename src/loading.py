@@ -41,7 +41,7 @@ from sklearn.kernel_approximation import RBFSampler as FourierApproximator
 from sklearn.linear_model import LogisticRegression as LR
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import StratifiedShuffleSplit as SSSplit
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC, LinearSVC
 from tqdm import tqdm
 from typing_extensions import Literal
@@ -52,14 +52,21 @@ from src.constants import DATA
 def load_df(path: Path, target: str) -> Tuple[DataFrame, Series]:
     df = pd.read_csv(path)
     x = df.drop(columns=[target])
+
     y = df[target].copy()
     return x, y
+
+
+def standardize(x: DataFrame) -> DataFrame:
+    return DataFrame(data=StandardScaler().fit_transform(x), columns=x.columns)
 
 
 def load_diabetes() -> Tuple[DataFrame, Series]:
     source = DATA / "diabetes/diabetes.csv"
     target = "Outcome"
-    return load_df(source, target)
+    x, y = load_df(source, target)
+    x = standardize(x)
+    return x, y
 
 
 def load_park() -> Tuple[DataFrame, Series]:
@@ -67,6 +74,7 @@ def load_park() -> Tuple[DataFrame, Series]:
     target = "status"
     x, y = load_df(source, target)
     x = x.drop(columns="name")
+    x = standardize(x)
     return x, y
 
 
@@ -74,7 +82,9 @@ def load_trans() -> Tuple[DataFrame, Series]:
     # original dataset has an entire sentence for the column name...
     source = DATA / "transfusion/transfusion.data"
     target = "donated"
-    return load_df(source, target)
+    x, y = load_df(source, target)
+    x = standardize(x)
+    return x, y
 
 
 def load_SPECT() -> Tuple[DataFrame, Series]:
@@ -83,7 +93,9 @@ def load_SPECT() -> Tuple[DataFrame, Series]:
     target = "diagnosis"
     x1, y1 = load_df(source, target)
     x2, y2 = load_df(source2, target)
-    return pd.concat([x1, x2], axis=0), pd.concat([y1, y2], axis=0)
+    x, y = pd.concat([x1, x2], axis=0), pd.concat([y1, y2], axis=0)
+    # all one-hots, no need to standardize
+    return x, y
 
 
 def load_heart_failure() -> Tuple[DataFrame, Series]:
@@ -147,6 +159,7 @@ def load_heart_failure() -> Tuple[DataFrame, Series]:
     floats = df.select_dtypes("float")
     floats["age"] = df["ageCat"].apply(lambda a: age_bins[a])
     floats.fillna(floats.median(), inplace=True)
+    floats = standardize(floats)
     df = pd.concat([floats, cats, bools], axis=1)
     return df, y
 
@@ -165,6 +178,7 @@ def load_diabetes130() -> Tuple[DataFrame, Series]:
     cats = pd.get_dummies(cats)
     ords = df.select_dtypes("int64")
     ords["age"] = df["age"].apply(lambda age: ages[age])
+    ords = standardize(ords)
     df = pd.concat([ords, cats, bools], axis=1)
 
     # TODO: one-hot encode categoricals
@@ -196,6 +210,11 @@ def load_uti_resistance(
             + df_targets.LVX.apply(str)
         )
         y = LabelEncoder().fit_transform(y_str)
+    floats = [col for col in df.columns if len(np.unique(df[col])) > 2]
+    bools = [col for col in df.columns if len(np.unique(df[col])) == 2]
+    df_float = standardize(df[floats])
+    df_bool = df[bools]
+    df = pd.concat([df_float, df_bool], axis=1)
     return df, y
 
 
@@ -308,7 +327,7 @@ def load_mimic_iv() -> Tuple[DataFrame, Series]:
         word_cols.append(Series(complaints.apply(lambda s: int(word in s)), name=word))
     complaints = pd.concat(word_cols, axis=1)
     cats = pd.get_dummies(cats)
-    df = pd.concat([df, cats, complaints], axis=1)
+    df = pd.concat([standardize(df), cats, complaints], axis=1)
     js = df.copy()
     js["target"] = y
     js.to_json(preproc)
@@ -520,11 +539,18 @@ if __name__ == "__main__":
         # "svc": lambda: SVC(),  # really bad this one
     }
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
-        # "heart-failure": load_heart_failure,  # all instant
-        # "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
+        "diabetes": load_diabetes,
+        "park": load_park,
+        "trans": load_trans,
+        "spect": load_SPECT,
+        "heart-failure": load_heart_failure,  # all instant
+        "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
         "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
+    for dsname, loader in datasets.items():
+        loader()
+    sys.exit()
     bests = {
         "heart-failure": {
             "svc-ny": 0.5995,
