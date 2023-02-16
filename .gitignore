@@ -2,9 +2,7 @@
 #                           Project-specific ignores                           #
 ################################################################################
 
-src/job_scripts
-src/results
-
+results
 test_results
 
 data/heart_failure

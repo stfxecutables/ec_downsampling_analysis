@@ -9,7 +9,10 @@ sys.path.append(str(ROOT))  # isort: skip
 
 import sys
 from pathlib import Path
+from typing import Optional
 
+import numpy as np
+from numpy.random import Generator
 from pandas import DataFrame, Series
 from sklearn.kernel_approximation import Nystroem
 from sklearn.linear_model import SGDClassifier
@@ -27,7 +30,9 @@ class NystroemSVM(Classifier):
         self.classifier = SGDClassifier(**self.hparams.sgd_dict())
         self.kernel_approximator: Nystroem
 
-    def fit(self, X: DataFrame, y: Series) -> None:
+    def fit(self, X: DataFrame, y: Series, rng: Optional[Generator]) -> None:
+        if rng is None:
+            rng = np.random.default_rng()
         ny_args = self.hparams.ny_dict()
         n_components = ny_args["n_components"]
         if X.shape[1] < n_components:

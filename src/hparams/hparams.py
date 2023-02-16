@@ -9,7 +9,7 @@ sys.path.append(str(ROOT))  # isort: skip
 
 import json
 import sys
-from abc import abstractmethod
+from abc import abstractmethod, abstractstaticmethod
 from argparse import Namespace
 from enum import Enum
 from typing import (
@@ -80,9 +80,8 @@ class Hparam(FileJSONable["Hparam"], Generic[T, H]):
     def clone(self) -> Hparam:
         ...
 
-    @abstractmethod
-    @staticmethod
-    def from_dict(tardict: Dict[str, Any]) -> Hparam:
+    @abstractstaticmethod
+    def from_dict(tardict: Dict[str, Any]) -> Hparam:  # type: ignore
         ...
 
     def __eq__(self, other: object) -> bool:

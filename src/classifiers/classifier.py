@@ -10,8 +10,9 @@ sys.path.append(str(ROOT))  # isort: skip
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
+from numpy.random import Generator
 from pandas import DataFrame, Series
 from sklearn.linear_model import SGDClassifier
 from xgboost import XGBClassifier, XGBRFClassifier
@@ -25,7 +26,7 @@ class Classifier(ABC):
         self.classifier: Union[SGDClassifier, XGBRFClassifier, XGBClassifier]
 
     @abstractmethod
-    def fit(self, X: DataFrame, y: Series) -> None:
+    def fit(self, X: DataFrame, y: Series, rng: Optional[Generator]) -> None:
         ...
 
     @abstractmethod

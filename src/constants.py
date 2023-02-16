@@ -33,6 +33,7 @@ DATA: Path = ensure_dir(ROOT / "data")
 RESULTS = ensure_dir(ROOT / "results")
 PLOTS = ensure_dir(RESULTS / "plots")
 
+HP_OUTDIR = ensure_dir(RESULTS / "hps")
 TEST_OUTDIR = ensure_dir(RESULTS / "test_results")
 DOWNSAMPLE_OUTDIR = ensure_dir(RESULTS / "downsample")
 FEATURE_SELECTION_OUTDIR = ensure_dir(RESULTS / "feature_selection")

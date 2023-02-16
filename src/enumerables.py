@@ -69,7 +69,7 @@ class Dataset(Enum):
 
 
 class ClassifierKind(Enum):
-    LR = "lr"
-    SVM = "svm"
     GBT = "gbt"
+    LR = "lr"
     RF = "rf"
+    SVM = "svm"

@@ -9,7 +9,10 @@ sys.path.append(str(ROOT))  # isort: skip
 
 import sys
 from pathlib import Path
+from typing import Optional
 
+import numpy as np
+from numpy.random import Generator
 from pandas import DataFrame, Series
 from sklearn.linear_model import SGDClassifier
 
@@ -25,7 +28,9 @@ class LogisticRegression(Classifier):
         self.hparams = hparams
         self.classifier = SGDClassifier(**self.hparams.to_dict())
 
-    def fit(self, X: DataFrame, y: Series) -> None:
+    def fit(self, X: DataFrame, y: Series, rng: Optional[Generator]) -> None:
+        if rng is None:
+            rng = np.random.default_rng()
         self.classifier.fit(X, y)
 
     def score(self, X: DataFrame, y: Series) -> float:

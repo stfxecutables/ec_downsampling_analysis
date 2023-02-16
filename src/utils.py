@@ -16,7 +16,8 @@ from src.classifiers.gbt import XGBoostClassifier
 from src.classifiers.logistic import LogisticRegression
 from src.classifiers.nystroem import NystroemSVM
 from src.classifiers.rf import XGBoostRFClassifier
-from src.enumerables import ClassifierKind
+from src.constants import HP_OUTDIR
+from src.enumerables import ClassifierKind, Dataset
 from src.hparams.gbt import XGBoostHparams
 from src.hparams.hparams import Hparams
 from src.hparams.logistic import SGDLRHparams
@@ -43,3 +44,21 @@ def get_rand_hparams(kind: ClassifierKind, rng: Optional[Generator]) -> Hparams:
     }
     hps = kinds[kind]
     return hps.random(rng)
+
+
+def load_tuning_params(dataset: Dataset, kind: ClassifierKind) -> Hparams:
+    root = HP_OUTDIR / f"{dataset.value}/{kind.value}/best"
+    kinds: Dict[ClassifierKind, Type[Hparams]] = {
+        ClassifierKind.GBT: XGBoostHparams,
+        ClassifierKind.LR: SGDLRHparams,
+        ClassifierKind.RF: XGBRFHparams,
+        ClassifierKind.SVM: NystroemHparams,
+    }
+    hp = kinds[kind]
+    return hp.from_json(root)
+
+
+def save_tuning_params(dataset: Dataset, kind: ClassifierKind, hps: Hparams) -> None:
+    root = HP_OUTDIR / f"{dataset.value}/{kind.value}/best"
+    hps.to_json(root)
+    print(f"Saved best hparams for {kind.name} on {dataset.name} to {root}")
