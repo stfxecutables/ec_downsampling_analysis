@@ -118,6 +118,12 @@ def load_heart_failure() -> Tuple[DataFrame, Series]:
     time.of.death..days.from.admission.        44.0   29.522727   72.452226
     """
     source = DATA / "heart_failure/dat.csv"
+    preprocessed = DATA / "heart_failure_preprocessed.json"
+    if preprocessed.exists():
+        df = pd.read_json(preprocessed)
+        y = df["target"].copy()
+        df = df.drop(columns="target")
+        return df, y
     drops = [  # may allow trivial prediction
         "death.within.28.days",
         "death.within.3.months",
@@ -167,10 +173,20 @@ def load_heart_failure() -> Tuple[DataFrame, Series]:
     floats.fillna(floats.median(), inplace=True)
     floats = standardize(floats)
     df = pd.concat([floats, cats, bools], axis=1)
+    df_all = df.copy()
+    df_all["target"] = y
+    df_all.to_json(preprocessed)
     return df, y
 
 
 def load_diabetes130() -> Tuple[DataFrame, Series]:
+    preprocessed = DATA / "diabetes130_preprocessed.json"
+    if preprocessed.exists():
+        df = pd.read_json(preprocessed)
+        y = df["target"].copy().astype(int)
+        df = df.drop(columns="target")
+        return df, y
+
     source = DATA / "diabetes130.csv"
     target = "readmit_30_days"
     df = pd.read_csv(source)
@@ -186,14 +202,21 @@ def load_diabetes130() -> Tuple[DataFrame, Series]:
     ords["age"] = df["age"].apply(lambda age: ages[age])
     ords = standardize(ords)
     df = pd.concat([ords, cats, bools], axis=1)
-
-    # TODO: one-hot encode categoricals
+    df_all = df.copy()
+    df_all["target"] = y
+    df_all.to_json(preprocessed)
     return df, y
 
 
 def load_uti_resistance(
     style: Literal["binary", "ordinal", "multi"] = "binary"
 ) -> Tuple[DataFrame, Series]:
+    preprocessed = DATA / "uti_preprocessed.json"
+    if preprocessed.exists():
+        df = pd.read_json(preprocessed)
+        y = df["target"].copy().astype(int)
+        df = df.drop(columns="target")
+        return df, y
     features = pd.read_csv(DATA / "uti_resistance/all_uti_features.csv")
     labels = pd.read_csv(DATA / "uti_resistance/all_uti_resist_labels.csv")
     # prescs = DATA / "uti_resitance/all_prescriptions.csv" not needed
@@ -221,6 +244,9 @@ def load_uti_resistance(
     df_float = standardize(df[floats])
     df_bool = df[bools]
     df = pd.concat([df_float, df_bool], axis=1)
+    df_all = df.copy()
+    df_all["target"] = y
+    df_all.to_json(preprocessed)
     return df, y
 
 
@@ -235,7 +261,7 @@ def load_mimic_iv() -> Tuple[DataFrame, Series]:
 
     """
     root = DATA / "mimic-iv-ed"
-    preproc = root / "preproc.json"
+    preproc = DATA / "mimic_iv_preprocessed.json"
     if preproc.exists():
         # use the version that can be uploaded to CC safely
         df = pd.read_json(preproc)
@@ -551,6 +577,9 @@ if __name__ == "__main__":
         "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
+    for loader in datasets.values():
+        loader()
+    sys.exit()
     bests = {
         "diabetes": {
             "svc-ny": 0.0,
