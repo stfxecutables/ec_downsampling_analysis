@@ -12,7 +12,6 @@ import sys
 from abc import abstractmethod
 from argparse import Namespace
 from enum import Enum
-from pathlib import Path
 from typing import (
     Any,
     Collection,
@@ -21,25 +20,15 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     Union,
-    cast,
-    no_type_check,
 )
 
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy import ndarray
 from numpy.random import Generator
-from pandas import DataFrame, Series
 from scipy.stats import loguniform
 from scipy.stats.qmc import Halton
-from typing_extensions import Literal
 
 from src.enumerables import Dataset
 from src.serialize import DirJSONable, FileJSONable
@@ -61,8 +50,8 @@ class Hparam(FileJSONable["Hparam"], Generic[T, H]):
     ) -> None:
         super().__init__()
         self.name: str = name
-        self._value: Union[T, None] = value
-        self._default: Union[T, None] = default
+        self._value: Optional[T] = value
+        self._default: Optional[T] = default
         self.kind: HparamKind
 
     def to_dict(self) -> Dict[str, Optional[T]]:
@@ -73,8 +62,8 @@ class Hparam(FileJSONable["Hparam"], Generic[T, H]):
         return self._value
 
     @value.setter
-    def value(self) -> T:
-        raise ValueError("Cannot set value on Hparam")
+    def value(self, val: Optional[T]) -> None:
+        self._value = val
 
     def default(self) -> Hparam:
         return self.new(value=self._default)
@@ -91,6 +80,7 @@ class Hparam(FileJSONable["Hparam"], Generic[T, H]):
     def clone(self) -> Hparam:
         ...
 
+    @abstractmethod
     @staticmethod
     def from_dict(tardict: Dict[str, Any]) -> Hparam:
         ...
@@ -686,32 +676,3 @@ class Hparams(DirJSONable):
             fmt.append(f"  {str(hp)}")
         fmt.append(")")
         return "\n".join(fmt)
-
-
-class SGDHparams(Hparams):
-    def __init__(
-        self,
-        eta0: float = 0.1,
-        alpha: float = 1e-4,
-        max_iter: int = 1500,
-        early_stopping: bool = False,
-    ) -> None:
-        self.loss = "log_loss"
-        self.max_iter = max_iter
-        self.shuffle = True
-        self.learning_rate = "adaptive"
-        self.eta0 = eta0
-        self.early_stopping = early_stopping
-        # self.alpha=1e-4,  # pretty decent
-        self.alpha = alpha  # mimic needs alpha < 1e-3, others benefit from >=1e-3
-
-    def as_dict(self) -> Dict[str, Any]:
-        return dict(
-            loss=self.loss,
-            max_iter=self.max_iter,
-            shuffle=self.shuffle,
-            learning_rate=self.learning_rate,
-            eta0=self.eta0,
-            early_stopping=self.early_stopping,
-            alpha=self.alpha,
-        )

@@ -8,7 +8,6 @@ sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
 import sys
-from pathlib import Path
 from typing import Any, Collection, Dict, List, Optional, Sequence, Union
 
 from src.enumerables import Dataset

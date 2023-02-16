@@ -66,3 +66,10 @@ class Dataset(Enum):
             Dataset.UTIResistance: load_uti_resistance,
         }
         return loaders[self]()
+
+
+class ClassifierKind(Enum):
+    LR = "lr"
+    SVM = "svm"
+    GBT = "gbt"
+    RF = "rf"

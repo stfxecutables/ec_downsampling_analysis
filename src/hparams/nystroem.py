@@ -8,7 +8,6 @@ sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
 import sys
-from pathlib import Path
 from typing import Any, Collection, Dict, List, Optional, Sequence, Union
 
 from typing_extensions import Literal
@@ -68,12 +67,12 @@ def nystroem_hparams(
             default="l2",
         ),
         CategoricalHparam("average", average, categories=[True, False], default=False),
-        FixedHparam("loss", value="log_loss", default="log_loss"),
+        FixedHparam("loss", value="hinge", default="hinge"),
         FixedHparam("learning_rate", value="adaptive", default="adaptive"),
     ]
 
 
-class SGDLRHparams(Hparams):
+class NystroemHparams(Hparams):
     def __init__(
         self,
         hparams: Union[Collection[Hparam], Sequence[Hparam], None] = None,
