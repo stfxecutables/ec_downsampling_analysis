@@ -9,25 +9,8 @@ sys.path.append(str(ROOT))  # isort: skip
 
 import sys
 from pathlib import Path
-from typing import (
-    Any,
-    Collection,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-    cast,
-    no_type_check,
-)
+from typing import Any, Collection, Dict, List, Optional, Sequence, Union
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy import ndarray
-from pandas import DataFrame, Series
 from typing_extensions import Literal
 
 from src.constants import SKLEARN_SGD_LR_DEFAULT as LR_DEFAULT
@@ -42,7 +25,7 @@ from src.hparams.hparams import (
     Hparams,
 )
 
-SGD_TUNED: dict[Dataset, dict[str, Any] | None] = {
+SGD_TUNED: Dict[Dataset, Optional[Dict[str, Any]]] = {
     Dataset.Diabetes: None,
     Dataset.Diabetes130: None,
     Dataset.HeartFailure: None,
@@ -55,12 +38,12 @@ SGD_TUNED: dict[Dataset, dict[str, Any] | None] = {
 
 
 def sgd_lr_hparams(
-    alpha: float | None = 1e-4,
-    l1_ratio: float | None = 0.15,
-    lr_init: float | None = 1e-3,
+    alpha: Optional[float] = 1e-4,
+    l1_ratio: Optional[float] = 0.15,
+    lr_init: Optional[float] = 1e-3,
     penalty: Literal["l1", "l2", "elasticnet", None] = "l2",
     average: bool = False,
-) -> list[Hparam]:
+) -> List[Hparam]:
     # see https://jcheminf.biomedcentral.com/articles/10.1186/s13321-015-0088-0#Sec6
     # for a possible tuning range on C, gamma
     return [
@@ -88,13 +71,13 @@ def sgd_lr_hparams(
 class SGDLRHparams(Hparams):
     def __init__(
         self,
-        hparams: Collection[Hparam] | Sequence[Hparam] | None = None,
+        hparams: Union[Collection[Hparam], Sequence[Hparam], None] = None,
     ) -> None:
         if hparams is None:
             hparams = sgd_lr_hparams()
         super().__init__(hparams)
 
-    def tuned_dict(self, dataset: Dataset) -> dict[str, Any]:
+    def tuned_dict(self, dataset: Dataset) -> Dict[str, Any]:
         hps = SGD_TUNED[dataset]
         if hps is None:
             return self.defaults().to_dict()

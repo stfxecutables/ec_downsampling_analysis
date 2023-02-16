@@ -92,7 +92,7 @@ class Hparam(FileJSONable["Hparam"], Generic[T, H]):
         ...
 
     @staticmethod
-    def from_dict(tardict: dict[str, Any]) -> Hparam:
+    def from_dict(tardict: Dict[str, Any]) -> Hparam:
         ...
 
     def __eq__(self, other: object) -> bool:
@@ -191,7 +191,7 @@ class ContinuousHparam(Hparam):
         )
 
     @staticmethod
-    def from_dict(tardict: dict[str, Any]) -> ContinuousHparam:
+    def from_dict(tardict: Dict[str, Any]) -> ContinuousHparam:
         d = Namespace(**tardict)
         return ContinuousHparam(
             name=d.name,
@@ -287,7 +287,7 @@ class OrdinalHparam(Hparam):
         )
 
     @staticmethod
-    def from_dict(tardict: dict[str, Any]) -> OrdinalHparam:
+    def from_dict(tardict: Dict[str, Any]) -> OrdinalHparam:
         d = Namespace(**tardict)
         return OrdinalHparam(
             name=d.name,
@@ -327,15 +327,15 @@ class CategoricalHparam(Hparam):
     def __init__(
         self,
         name: str,
-        value: Any | None,
-        categories: Sequence[Any] | Collection[Any],
-        default: Any | None = None,
+        value: Optional[Any],
+        categories: Union[Sequence[Any], Collection[Any]],
+        default: Optional[Any] = None,
     ) -> None:
         super().__init__(name=name, value=value, default=default)
         self.name: str = name
         self.kind: HparamKind = HparamKind.Categorical
-        self._value: Any | None = value if value is not None else None
-        self.categories: list[Any] = sorted(categories, key=str)
+        self._value: Optional[Any] = value if value is not None else None
+        self.categories: List[Any] = sorted(categories, key=str)
         self.n_categories: int = len(self.categories)
 
     def new(self, value: Any) -> CategoricalHparam:
@@ -387,7 +387,7 @@ class CategoricalHparam(Hparam):
         )
 
     @staticmethod
-    def from_dict(tardict: dict[str, Any]) -> CategoricalHparam:
+    def from_dict(tardict: Dict[str, Any]) -> CategoricalHparam:
         d = Namespace(**tardict)
         return CategoricalHparam(
             name=d.name,
@@ -423,7 +423,7 @@ class CategoricalHparam(Hparam):
 
 
 class FixedHparam(Hparam, Generic[T]):
-    def __init__(self, name: str, value: T, default: Any | None = None) -> None:
+    def __init__(self, name: str, value: T, default: Optional[Any] = None) -> None:
         super().__init__(name=name, value=value, default=default)
         self.name: str = name
         self.kind: HparamKind = HparamKind.Fixed
@@ -471,7 +471,7 @@ class FixedHparam(Hparam, Generic[T]):
         )
 
     @staticmethod
-    def from_dict(tardict: dict[str, Any]) -> FixedHparam:
+    def from_dict(tardict: Dict[str, Any]) -> FixedHparam:
         d = Namespace(**tardict)
         return FixedHparam(
             name=d.name,
@@ -505,21 +505,21 @@ class FixedHparam(Hparam, Generic[T]):
 
 class Hparams(DirJSONable):
     def __init__(
-        self, hparams: Collection[Hparam] | Sequence[Hparam] | None = None
+        self, hparams: Union[Collection[Hparam], Sequence[Hparam], None] = None
     ) -> None:
         super().__init__()
         hps = sorted(hparams, key=lambda hp: hp.name) if hparams is not None else []
-        self.hparams: dict[str, Hparam] = {}
+        self.hparams: Dict[str, Hparam] = {}
         for hp in hps:
             if hp.name in self.hparams:
                 raise ValueError(f"Hparam with duplicate name {hp.name} found.")
             self.hparams[hp.name] = hp
 
         self.n_hparams = self.N = len(self.hparams)
-        self.continuous: dict[str, ContinuousHparam] = {}
-        self.ordinals: dict[str, OrdinalHparam] = {}
-        self.categoricals: dict[str, CategoricalHparam] = {}
-        self.fixeds: dict[str, FixedHparam] = {}
+        self.continuous: Dict[str, ContinuousHparam] = {}
+        self.ordinals: Dict[str, OrdinalHparam] = {}
+        self.categoricals: Dict[str, CategoricalHparam] = {}
+        self.fixeds: Dict[str, FixedHparam] = {}
         for name, hp in self.hparams.items():
             if hp.kind is HparamKind.Continuous:
                 self.continuous[name] = hp  # type: ignore
@@ -536,7 +536,7 @@ class Hparams(DirJSONable):
         self.n_categorical = len(self.categoricals)
         self.n_fixed = len(self.fixeds)
 
-    def to_dict(self) -> dict[str, int | float | str]:
+    def to_dict(self) -> Dict[str, Union[int, float, str]]:
         d = {}
         for hp in self.hparams.values():
             if hp.name in d:
@@ -577,7 +577,7 @@ class Hparams(DirJSONable):
             Halton_cnt.fast_forward(iteration)
             Halton_ord.fast_forward(iteration)
 
-        hps: list[Hparam] = []
+        hps: List[Hparam] = []
         conts = Halton_cnt.random()
         hpc: ContinuousHparam
         for i, (name, hpc) in enumerate(self.continuous.items()):
@@ -649,7 +649,7 @@ class Hparams(DirJSONable):
         return cls(hparams=hparams)
 
     @classmethod
-    def from_dicts(cls: Type[Hparams], tardicts: list[dict[str, Any]]) -> Hparams:
+    def from_dicts(cls: Type[Hparams], tardicts: List[dict[str, Any]]) -> Hparams:
         hparams = []
         for tardict in tardicts:
             if tardict["kind"] == "categorical":
