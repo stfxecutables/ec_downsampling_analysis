@@ -8,6 +8,7 @@ sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
 import sys
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,7 +59,9 @@ def load_df(path: Path, target: str) -> Tuple[DataFrame, Series]:
 
 
 def standardize(x: DataFrame) -> DataFrame:
-    return DataFrame(data=StandardScaler().fit_transform(x), columns=x.columns)
+    return DataFrame(
+        data=StandardScaler().fit_transform(x), columns=x.columns, index=x.index
+    )
 
 
 def load_diabetes() -> Tuple[DataFrame, Series]:
@@ -378,10 +381,13 @@ class ApproximateSVM(ABC):
         sgd.loss = "hinge"  # force implementation of linear SVM
         # sgd.loss = "modified_huber"  # seems not good
         # sgd.loss = "squared_hinge"  # no good
-        self.kernel_approximator: Union[Nystroem, FourierApproximator]
+        self.gamma = gamma
+        self.n_components = n_components
         self.sgd_hps = sgd
         self.classifier = SGDClassifier(**self.sgd_hps.as_dict())
+        self.kernel_approximator: Union[Nystroem, FourierApproximator]
 
+    @abstractmethod
     def fit(self, X: DataFrame, y: Series) -> None:
         Xt = self.kernel_approximator.fit_transform(X=X)
         self.classifier.fit(Xt, y)
@@ -399,11 +405,17 @@ class NystroemSVM(ApproximateSVM):
         sgd: Optional[SGDHparams] = None,
     ) -> None:
         super().__init__(gamma=gamma, n_components=n_components, sgd=sgd)
+
+    def fit(self, X: DataFrame, y: Series) -> None:
+        if X.shape[1] < self.n_components:
+            self.n_components = X.shape[1]
         self.kernel_approximator = Nystroem(
             kernel="rbf",
-            gamma=gamma,
-            n_components=n_components,
+            gamma=self.gamma,
+            n_components=self.n_components,
         )
+        Xt = self.kernel_approximator.fit_transform(X=X)
+        self.classifier.fit(Xt, y)
 
 
 class RandomFourierSVM(ApproximateSVM):
@@ -414,10 +426,16 @@ class RandomFourierSVM(ApproximateSVM):
         sgd: Optional[SGDHparams] = None,
     ) -> None:
         super().__init__(gamma=gamma, n_components=n_components, sgd=sgd)
+
+    def fit(self, X: DataFrame, y: Series) -> None:
+        if X.shape[1] < self.n_components:
+            self.n_components = X.shape[1]
         self.kernel_approximator = FourierApproximator(
-            gamma="scale" if gamma is None else gamma,  # type: ignore
-            n_components=n_components,
+            gamma=self.gamma or "scale",  # type: ignore
+            n_components=self.n_components,
         )
+        Xt = self.kernel_approximator.fit_transform(X=X)
+        self.classifier.fit(Xt, y)
 
 
 if __name__ == "__main__":
@@ -539,19 +557,48 @@ if __name__ == "__main__":
         # "svc": lambda: SVC(),  # really bad this one
     }
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {
-        "diabetes": load_diabetes,
-        "park": load_park,
-        "trans": load_trans,
-        "spect": load_SPECT,
-        "heart-failure": load_heart_failure,  # all instant
-        "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
-        "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
+        # "diabetes": load_diabetes,
+        # "park": load_park,
+        # "trans": load_trans,
+        # "spect": load_SPECT,
+        # "heart-failure": load_heart_failure,  # all instant
+        # "diabetes-130": load_diabetes130,  # all under 2mins even with 1 core, RF and GBT under 10s
+        # "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
-    for dsname, loader in datasets.items():
-        loader()
-    sys.exit()
     bests = {
+        "diabetes": {
+            "svc-ny": 0.0,
+            "svc-ks": 0.0,
+            "lr-sgd": 0.0,
+            "lr": 0.0,
+            "rf": 0.0,
+            "gbt": 0.0,
+        },
+        "park": {
+            "svc-ny": 0.0,
+            "svc-ks": 0.0,
+            "lr-sgd": 0.0,
+            "lr": 0.0,
+            "rf": 0.0,
+            "gbt": 0.0,
+        },
+        "trans": {
+            "svc-ny": 0.0,
+            "svc-ks": 0.0,
+            "lr-sgd": 0.0,
+            "lr": 0.0,
+            "rf": 0.0,
+            "gbt": 0.0,
+        },
+        "spect": {
+            "svc-ny": 0.0,
+            "svc-ks": 0.0,
+            "lr-sgd": 0.0,
+            "lr": 0.0,
+            "rf": 0.0,
+            "gbt": 0.0,
+        },
         "heart-failure": {
             "svc-ny": 0.5995,
             "svc-ks": 0.5995,
@@ -585,16 +632,13 @@ if __name__ == "__main__":
             "gbt": 0.7434,
         },
     }
+
     for dsname, loader in datasets.items():
         for classifier, fitter in classifiers.items():
-            # print("=" * 80)
-            # print(f"Estimating runtimes for {dsname} with {classifier.upper()}")
             X, y = loader()
-            # N = min(5000, len(X))
-            # N = min(80_000, len(X)) if dsname != "mimic-iv" else len(X)
             N = len(X)
-            while N <= len(X):
-                idx = np.random.permutation(len(X))[:N]
+            try:
+                idx = np.random.permutation(N)
                 Xm, ym = X.iloc[idx, :], y.iloc[idx]
                 splitter = SSSplit(n_splits=1, test_size=0.2)
                 idx_train, idx_test = next(splitter.split(Xm, ym))
@@ -616,4 +660,8 @@ if __name__ == "__main__":
                     # f"[Finished at {strftime('%c')}]"
                     f"{{acc={acc:0.4f} {compare} {best:-.4f}}}"
                 )
-                N *= 2
+            except Exception as e:
+                traceback.print_exc()
+                print(
+                    f"Got error for data={dsname}, classifier={classifier}. Info above."
+                )
