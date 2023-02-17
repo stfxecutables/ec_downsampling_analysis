@@ -11,6 +11,8 @@ data/uti_resistance
 data/*.zip
 data/*preprocessed.json
 
+sync_code_niagara.sh
+
 
 
 ################################################################################
