@@ -28,7 +28,7 @@ from typing_extensions import Literal
 from src.constants import RESULTS
 from src.enumerables import ClassifierKind, Dataset
 from src.hparams.hparams import Hparams
-from src.utils import get_classifier, get_rand_hparams, save_tuning_params
+from src.utils import get_classifier, get_rand_hparams, is_tuned, save_tuning_params
 
 
 @dataclass
@@ -76,8 +76,11 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
         return None
 
 
-def random_tune(classifier: ClassifierKind, dataset: Dataset, n_runs: int = 100) -> None:
-    X, y = dataset.load()
+def random_tune(
+    classifier: ClassifierKind, dataset: Dataset, n_runs: int = 100, force: bool = False
+) -> None:
+    if not force and is_tuned(dataset=dataset, kind=classifier):
+        return
     K = 5
     run_seeds = np.random.SeedSequence().spawn(n_runs)
     run_rngs = [np.random.default_rng(seed) for seed in run_seeds]
@@ -127,7 +130,9 @@ def random_tune(classifier: ClassifierKind, dataset: Dataset, n_runs: int = 100)
 
 
 if __name__ == "__main__":
-    # random_tune(classifier=ClassifierKind.LR, dataset=Dataset.Diabetes, n_runs=100)
+    # random_tune(
+    #     classifier=ClassifierKind.LR, dataset=Dataset.Diabetes, n_runs=100, force=False
+    # )
     for dataset in Dataset:
         for kind in ClassifierKind:
-            random_tune(classifier=kind, dataset=dataset, n_runs=250)
+            random_tune(classifier=kind, dataset=dataset, n_runs=250, force=False)

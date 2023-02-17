@@ -46,8 +46,17 @@ def get_rand_hparams(kind: ClassifierKind, rng: Optional[Generator]) -> Hparams:
     return hps.random(rng)
 
 
+def tuning_outdir(dataset: Dataset, kind: ClassifierKind) -> Path:
+    return HP_OUTDIR / f"{dataset.value}/{kind.value}/best"
+
+
+def is_tuned(dataset: Dataset, kind: ClassifierKind) -> bool:
+    root = tuning_outdir(dataset=dataset, kind=kind)
+    return len(list(root.rglob("*.json"))) > 0
+
+
 def load_tuning_params(dataset: Dataset, kind: ClassifierKind) -> Hparams:
-    root = HP_OUTDIR / f"{dataset.value}/{kind.value}/best"
+    root = tuning_outdir(dataset=dataset, kind=kind)
     kinds: Dict[ClassifierKind, Type[Hparams]] = {
         ClassifierKind.GBT: XGBoostHparams,
         ClassifierKind.LR: SGDLRHparams,
@@ -59,6 +68,6 @@ def load_tuning_params(dataset: Dataset, kind: ClassifierKind) -> Hparams:
 
 
 def save_tuning_params(dataset: Dataset, kind: ClassifierKind, hps: Hparams) -> None:
-    root = HP_OUTDIR / f"{dataset.value}/{kind.value}/best"
+    root = tuning_outdir(dataset=dataset, kind=kind)
     hps.to_json(root)
     print(f"Saved best hparams for {kind.name} on {dataset.name} to {root}")
