@@ -17,6 +17,7 @@ from pandas import DataFrame, Series
 from xgboost import XGBClassifier
 
 from src.classifiers.classifier import Classifier
+from src.enumerables import Metric
 from src.hparams.gbt import XGBoostHparams
 
 
@@ -33,5 +34,6 @@ class XGBoostClassifier(Classifier):
             rng = np.random.default_rng()
         self.classifier.fit(X, y)
 
-    def score(self, X: DataFrame, y: Series) -> float:
-        return float(self.classifier.score(X, y))
+    # def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
+    #     y_pred = self.classifier.predict(X)
+    #     return float(self.classifier.score(X, y))

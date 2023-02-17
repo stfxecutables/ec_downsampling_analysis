@@ -18,6 +18,7 @@ from sklearn.kernel_approximation import Nystroem
 from sklearn.linear_model import SGDClassifier
 
 from src.classifiers.classifier import Classifier
+from src.enumerables import Metric
 from src.hparams.nystroem import NystroemHparams
 
 
@@ -45,6 +46,7 @@ class NystroemSVM(Classifier):
         Xt = self.kernel_approximator.fit_transform(X=X)
         self.classifier.fit(Xt, y)
 
-    def score(self, X: DataFrame, y: Series) -> float:
+    def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
         Xt = self.kernel_approximator.fit_transform(X=X)
-        return float(self.classifier.score(Xt, y))
+        y_pred = self.classifier.predict(Xt)
+        return metric.compute(y_true=y, y_pred=y_pred)

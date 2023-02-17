@@ -158,3 +158,6 @@ class XGBoostHparams(Hparams):
         if hps is None:
             return self.defaults().to_dict()
         return hps
+
+    def set_n_jobs(self, n_jobs: int) -> None:
+        self.hparams["n_jobs"].value = n_jobs

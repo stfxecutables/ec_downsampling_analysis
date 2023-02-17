@@ -7,9 +7,10 @@ ROOT = Path(__file__).resolve().parent.parent  # isort: skip
 sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
-from typing import Dict, Optional, Type, Union
+from typing import Dict, Optional, Type, Union, overload
 
 from numpy.random import Generator
+from typing_extensions import Literal
 
 from src.classifiers.classifier import Classifier
 from src.classifiers.gbt import XGBoostClassifier
@@ -25,6 +26,26 @@ from src.hparams.nystroem import NystroemHparams
 from src.hparams.rf import XGBRFHparams
 
 
+@overload
+def get_classifier(kind: Literal[ClassifierKind.GBT]) -> Type[XGBoostClassifier]:
+    ...
+
+
+@overload
+def get_classifier(kind: Literal[ClassifierKind.LR]) -> Type[LogisticRegression]:
+    ...
+
+
+@overload
+def get_classifier(kind: Literal[ClassifierKind.RF]) -> Type[XGBoostRFClassifier]:
+    ...
+
+
+@overload
+def get_classifier(kind: Literal[ClassifierKind.SVM]) -> Type[NystroemSVM]:
+    ...
+
+
 def get_classifier(kind: ClassifierKind) -> Type[Classifier]:
     kinds: Dict[ClassifierKind, Type[Classifier]] = {
         ClassifierKind.GBT: XGBoostClassifier,
@@ -33,6 +54,34 @@ def get_classifier(kind: ClassifierKind) -> Type[Classifier]:
         ClassifierKind.SVM: NystroemSVM,
     }
     return kinds[kind]
+
+
+@overload
+def get_rand_hparams(
+    kind: Literal[ClassifierKind.GBT], rng: Optional[Generator]
+) -> XGBoostHparams:
+    ...
+
+
+@overload
+def get_rand_hparams(
+    kind: Literal[ClassifierKind.LR], rng: Optional[Generator]
+) -> SGDLRHparams:
+    ...
+
+
+@overload
+def get_rand_hparams(
+    kind: Literal[ClassifierKind.RF], rng: Optional[Generator]
+) -> XGBRFHparams:
+    ...
+
+
+@overload
+def get_rand_hparams(
+    kind: Literal[ClassifierKind.SVM], rng: Optional[Generator]
+) -> NystroemHparams:
+    ...
 
 
 def get_rand_hparams(kind: ClassifierKind, rng: Optional[Generator]) -> Hparams:

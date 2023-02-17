@@ -30,6 +30,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
 from pandas import DataFrame, Series
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 from typing_extensions import Literal
 
 from src.loading import (
@@ -73,3 +74,21 @@ class ClassifierKind(Enum):
     LR = "lr"
     RF = "rf"
     SVM = "svm"
+
+
+class Metric(Enum):
+    Accuracy = "acc"
+    F1 = "f1"
+    BalancedAccuracy = "acc-bal"
+
+    def compute(
+        self, y_true: Union[ndarray, Series], y_pred: Union[ndarray, Series]
+    ) -> float:
+        computer = {
+            Metric.Accuracy: accuracy_score,
+            Metric.F1: lambda y_true, y_pred: f1_score(
+                y_true=y_true, y_pred=y_pred, average="weighted"
+            ),
+            Metric.BalancedAccuracy: balanced_accuracy_score,
+        }[self]
+        return float(computer(y_true, y_pred))

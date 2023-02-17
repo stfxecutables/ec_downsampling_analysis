@@ -17,6 +17,7 @@ from pandas import DataFrame, Series
 from sklearn.linear_model import SGDClassifier
 
 from src.classifiers.classifier import Classifier
+from src.enumerables import Metric
 from src.hparams.logistic import SGDLRHparams
 
 
@@ -33,5 +34,5 @@ class LogisticRegression(Classifier):
             rng = np.random.default_rng()
         self.classifier.fit(X, y)
 
-    def score(self, X: DataFrame, y: Series) -> float:
-        return float(self.classifier.score(X, y))
+    # def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
+    #     return float(self.classifier.score(X, y))

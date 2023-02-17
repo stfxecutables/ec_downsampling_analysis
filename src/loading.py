@@ -577,6 +577,8 @@ if __name__ == "__main__":
         "uti-resist": load_uti_resistance,  # LR=<1min, SVC=, RF=<1min@1core, GBT=<20s
         "mimic-iv": load_mimic_iv,  # LR=<2min, RF=<90s@1core , GBT=<1min
     }
+    X, y = load_mimic_iv()
+
     for loader in datasets.values():
         loader()
     sys.exit()

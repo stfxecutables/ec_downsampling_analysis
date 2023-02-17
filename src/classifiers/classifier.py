@@ -17,6 +17,7 @@ from pandas import DataFrame, Series
 from sklearn.linear_model import SGDClassifier
 from xgboost import XGBClassifier, XGBRFClassifier
 
+from src.enumerables import Metric
 from src.hparams.hparams import Hparams
 
 
@@ -29,6 +30,6 @@ class Classifier(ABC):
     def fit(self, X: DataFrame, y: Series, rng: Optional[Generator]) -> None:
         ...
 
-    @abstractmethod
-    def score(self, X: DataFrame, y: Series) -> float:
-        ...
+    def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
+        y_pred = self.classifier.predict(X)
+        return metric.compute(y_true=y, y_pred=y_pred)

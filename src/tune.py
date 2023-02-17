@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent  # isort: skip
 sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
+import os
 import sys
 import traceback
 from dataclasses import dataclass
@@ -26,7 +27,7 @@ from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 
 from src.constants import RESULTS
-from src.enumerables import ClassifierKind, Dataset
+from src.enumerables import ClassifierKind, Dataset, Metric
 from src.hparams.hparams import Hparams
 from src.utils import get_classifier, get_rand_hparams, is_tuned, save_tuning_params
 
@@ -35,6 +36,7 @@ from src.utils import get_classifier, get_rand_hparams, is_tuned, save_tuning_pa
 class ParallelArgs:
     kind: ClassifierKind
     dataset: Dataset
+    metric: Metric
     hparams: Hparams
     fold: int
     run: int
@@ -46,10 +48,12 @@ class ParallelResult:
     hparams: Hparams
     fold: int
     run: int
-    acc: float
+    score: float
 
     def to_df(self) -> DataFrame:
-        return DataFrame({"run": self.run, "fold": self.fold, "acc": self.acc}, index=[0])
+        return DataFrame(
+            {"run": self.run, "fold": self.fold, "acc": self.score}, index=[0]
+        )
 
 
 def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
@@ -58,17 +62,18 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
         classifier = cls(args.hparams)
         rng = args.rng
         X, y = args.dataset.load()
+        # X, y = args.dataset.load()
         skf = StratifiedKFold(n_splits=5, shuffle=False)
         idx_train, idx_test = list(skf.split(y, y))[args.fold]
         X_tr, y_tr = X.iloc[idx_train], y.iloc[idx_train]
         X_test, y_test = X.iloc[idx_test], y.iloc[idx_test]
         classifier.fit(X_tr, y_tr, rng=rng)
-        acc = classifier.score(X_test, y_test)
+        score = classifier.score(X_test, y_test, metric=args.metric)
         return ParallelResult(
             hparams=args.hparams,
             fold=args.fold,
             run=args.run,
-            acc=acc,
+            score=score,
         )
     except Exception as e:
         traceback.print_exc()
@@ -77,11 +82,16 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
 
 
 def random_tune(
-    classifier: ClassifierKind, dataset: Dataset, n_runs: int = 100, force: bool = False
+    classifier: ClassifierKind,
+    dataset: Dataset,
+    metric: Metric = Metric.Accuracy,
+    n_runs: int = 100,
+    force: bool = False,
 ) -> None:
     if not force and is_tuned(dataset=dataset, kind=classifier):
         return
     K = 5
+    xgb_jobs = 4 if dataset is Dataset.MimicIV else 8
     run_seeds = np.random.SeedSequence().spawn(n_runs)
     run_rngs = [np.random.default_rng(seed) for seed in run_seeds]
     fold_rngs: List[List[Generator]] = []
@@ -89,13 +99,24 @@ def random_tune(
         fold_rngs.append([np.random.default_rng(seed) for seed in seed.spawn(K)])
 
     pargs = []
+    tqdm_args = dict(chunksize=1)
     for run in range(n_runs):
-        hps = get_rand_hparams(kind=classifier, rng=run_rngs[run])
+        hps = get_rand_hparams(kind=classifier, rng=run_rngs[run])  # type: ignore
+        if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
+            if os.environ.get("CC_CLUSTER") == "niagara":
+                n_workers = 80 // xgb_jobs
+                hps.set_n_jobs(xgb_jobs)
+                tqdm_args["max_workers"] = n_workers
+            else:
+                n_workers = 8 // xgb_jobs
+                hps.set_n_jobs(xgb_jobs)
+                tqdm_args["max_workers"] = n_workers
         for fold in range(K):
             pargs.append(
                 ParallelArgs(
                     kind=classifier,
                     dataset=dataset,
+                    metric=metric,
                     hparams=hps,
                     fold=fold,
                     run=run,
@@ -104,7 +125,7 @@ def random_tune(
             )
 
     results = process_map(
-        evaluate, pargs, desc=f"Fitting {classifier.name} on {dataset.name}", chunksize=1
+        evaluate, pargs, desc=f"Fitting {classifier.name} on {dataset.name}", **tqdm_args
     )
     results: List[ParallelResult] = [result for result in results if result is not None]
     dfs = [result.to_df() for result in results]
@@ -134,5 +155,14 @@ if __name__ == "__main__":
     #     classifier=ClassifierKind.LR, dataset=Dataset.Diabetes, n_runs=100, force=False
     # )
     for dataset in Dataset:
+        if dataset not in [Dataset.MimicIV, Dataset.UTIResistance]:
+            continue
         for kind in ClassifierKind:
-            random_tune(classifier=kind, dataset=dataset, n_runs=250, force=False)
+            # random_tune(classifier=kind, dataset=dataset, n_runs=250, force=False)
+            random_tune(
+                classifier=kind,
+                dataset=dataset,
+                metric=Metric.F1,
+                n_runs=250,
+                force=False,
+            )
