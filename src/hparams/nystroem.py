@@ -69,6 +69,7 @@ def nystroem_hparams(
         CategoricalHparam("average", average, categories=[True, False], default=False),
         FixedHparam("loss", value="hinge", default="hinge"),
         FixedHparam("learning_rate", value="adaptive", default="adaptive"),
+        FixedHparam("n_jobs", value=1, default=1),
     ]
 
 

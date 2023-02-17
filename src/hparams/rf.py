@@ -140,6 +140,7 @@ def xgboost_rf_hparams(
             value=True,
         ),
         FixedHparam("tree_method", value="hist"),
+        FixedHparam("n_jobs", value=1),
     ]
 
 

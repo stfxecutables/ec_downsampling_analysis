@@ -101,7 +101,7 @@ def random_tune(classifier: ClassifierKind, dataset: Dataset, n_runs: int = 100)
             )
 
     results = process_map(
-        evaluate, pargs, desc=f"Fitting {classifier.name} on {dataset.name}"
+        evaluate, pargs, desc=f"Fitting {classifier.name} on {dataset.name}", chunksize=1
     )
     results: List[ParallelResult] = [result for result in results if result is not None]
     dfs = [result.to_df() for result in results]
@@ -130,4 +130,4 @@ if __name__ == "__main__":
     # random_tune(classifier=ClassifierKind.LR, dataset=Dataset.Diabetes, n_runs=100)
     for dataset in Dataset:
         for kind in ClassifierKind:
-            random_tune(classifier=kind, dataset=dataset)
+            random_tune(classifier=kind, dataset=dataset, n_runs=250)

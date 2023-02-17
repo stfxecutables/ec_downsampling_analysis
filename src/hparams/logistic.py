@@ -64,6 +64,7 @@ def sgd_lr_hparams(
         CategoricalHparam("average", average, categories=[True, False], default=False),
         FixedHparam("loss", value="log_loss", default="log_loss"),
         FixedHparam("learning_rate", value="adaptive", default="adaptive"),
+        FixedHparam("n_jobs", value=1, default=1),
     ]
 
 
