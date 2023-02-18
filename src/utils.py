@@ -26,26 +26,6 @@ from src.hparams.nystroem import NystroemHparams
 from src.hparams.rf import XGBRFHparams
 
 
-@overload
-def get_classifier(kind: Literal[ClassifierKind.GBT]) -> Type[XGBoostClassifier]:
-    ...
-
-
-@overload
-def get_classifier(kind: Literal[ClassifierKind.LR]) -> Type[LogisticRegression]:
-    ...
-
-
-@overload
-def get_classifier(kind: Literal[ClassifierKind.RF]) -> Type[XGBoostRFClassifier]:
-    ...
-
-
-@overload
-def get_classifier(kind: Literal[ClassifierKind.SVM]) -> Type[NystroemSVM]:
-    ...
-
-
 def get_classifier(kind: ClassifierKind) -> Type[Classifier]:
     kinds: Dict[ClassifierKind, Type[Classifier]] = {
         ClassifierKind.GBT: XGBoostClassifier,
