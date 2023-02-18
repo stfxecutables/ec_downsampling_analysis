@@ -34,6 +34,7 @@ RESULTS = ensure_dir(ROOT / "results")
 PLOTS = ensure_dir(RESULTS / "plots")
 
 HP_OUTDIR = ensure_dir(RESULTS / "hps")
+CKPT_OUTDIR = ensure_dir(RESULTS / "ckpts")
 TEST_OUTDIR = ensure_dir(RESULTS / "test_results")
 DOWNSAMPLE_OUTDIR = ensure_dir(RESULTS / "downsample")
 FEATURE_SELECTION_OUTDIR = ensure_dir(RESULTS / "feature_selection")

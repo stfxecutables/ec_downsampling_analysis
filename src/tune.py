@@ -12,7 +12,18 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union, cast, no_type_check
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+    no_type_check,
+)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,10 +37,20 @@ from sklearn.model_selection import StratifiedKFold
 from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 
-from src.constants import RESULTS
+from src.constants import CKPT_OUTDIR, RESULTS, ensure_dir
 from src.enumerables import ClassifierKind, Dataset, Metric
+from src.hparams.gbt import XGBoostHparams
 from src.hparams.hparams import Hparams
-from src.utils import get_classifier, get_rand_hparams, is_tuned, save_tuning_params
+from src.hparams.logistic import SGDLRHparams
+from src.hparams.nystroem import NystroemHparams
+from src.hparams.rf import XGBRFHparams
+from src.utils import (
+    get_classifier,
+    get_rand_hparams,
+    is_tuned,
+    save_tuning_params,
+    tuning_outdir,
+)
 
 
 @dataclass
@@ -41,6 +62,7 @@ class ParallelArgs:
     fold: int
     run: int
     rng: Generator
+    use_ckpt: bool = True
 
 
 @dataclass
@@ -56,8 +78,50 @@ class ParallelResult:
         )
 
 
+def get_ckpt_dir(dataset: Dataset, kind: ClassifierKind, run: int, fold: int) -> Path:
+    return ensure_dir(CKPT_OUTDIR / f"{dataset.value}/{kind.value}/{run}/{fold}/ckpt")
+
+
+def get_hp_dir(dataset: Dataset, kind: ClassifierKind, run: int, fold: int) -> Path:
+    ckpt_dir = CKPT_OUTDIR / f"{dataset.value}/{kind.value}/{run}/{fold}/ckpt"
+    return ensure_dir(ckpt_dir / "hps")
+
+
+def is_computed(dataset: Dataset, kind: ClassifierKind, run: int, fold: int) -> bool:
+    ckpt_dir = CKPT_OUTDIR / f"{dataset.value}/{kind.value}/{run}/{fold}/ckpt"
+    jsons = list(ckpt_dir.rglob("*.json"))
+    n_jsons = len(jsons)
+    return n_jsons > 0 and "score.json" in [p.name for p in jsons]
+
+
+def load_run_fold_params(
+    dataset: Dataset, kind: ClassifierKind, run: int, fold: int
+) -> Hparams:
+    root = get_hp_dir(dataset=dataset, kind=kind, run=run, fold=fold)
+    kinds: Dict[ClassifierKind, Type[Hparams]] = {
+        ClassifierKind.GBT: XGBoostHparams,
+        ClassifierKind.LR: SGDLRHparams,
+        ClassifierKind.RF: XGBRFHparams,
+        ClassifierKind.SVM: NystroemHparams,
+    }
+    hp = kinds[kind]
+    return hp.from_json(root)
+
+
 def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
     try:
+        dataset = args.dataset
+        kind = args.kind
+        run = args.run
+        fold = args.fold
+        ckpt = get_ckpt_dir(dataset=dataset, kind=kind, run=run, fold=fold)
+        hp_dir = get_hp_dir(dataset=dataset, kind=kind, run=run, fold=fold)
+        scorefile = ckpt / "score.json"
+        if args.use_ckpt and is_computed(dataset, kind, run, fold):
+            hps = load_run_fold_params(dataset=dataset, kind=kind, run=run, fold=fold)
+            score = float(pd.read_json(scorefile, typ="series").to_numpy().item())
+            return ParallelResult(hparams=hps, fold=fold, run=run, score=score)
+
         cls = get_classifier(args.kind)
         classifier = cls(args.hparams)
         rng = args.rng
@@ -69,6 +133,9 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
         X_test, y_test = X.iloc[idx_test], y.iloc[idx_test]
         classifier.fit(X_tr, y_tr, rng=rng)
         score = classifier.score(X_test, y_test, metric=args.metric)
+        s = Series([score], name=args.metric.value)
+        s.to_json(scorefile)
+        args.hparams.to_json(hp_dir)
         return ParallelResult(
             hparams=args.hparams,
             fold=args.fold,
@@ -86,6 +153,7 @@ def random_tune(
     dataset: Dataset,
     metric: Metric = Metric.Accuracy,
     n_runs: int = 100,
+    max_workers: int = 1,
     force: bool = False,
 ) -> None:
     if not force and is_tuned(dataset=dataset, kind=classifier):
@@ -102,15 +170,16 @@ def random_tune(
     tqdm_args = dict(chunksize=1)
     for run in range(n_runs):
         hps = get_rand_hparams(kind=classifier, rng=run_rngs[run])  # type: ignore
+        n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
         if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
-            if os.environ.get("CC_CLUSTER") == "niagara":
-                n_workers = 80 // xgb_jobs
-                hps.set_n_jobs(xgb_jobs)
-                tqdm_args["max_workers"] = n_workers
-            else:
-                n_workers = 8 // xgb_jobs
-                hps.set_n_jobs(xgb_jobs)
-                tqdm_args["max_workers"] = n_workers
+            n_workers = n_cpu // xgb_jobs
+            hps.set_n_jobs(xgb_jobs)
+            tqdm_args["max_workers"] = n_workers
+        else:
+            tqdm_args["max_workers"] = max_workers
+            n_jobs = n_cpu // max_workers
+            hps.set_n_jobs(n_jobs)
+
         for fold in range(K):
             pargs.append(
                 ParallelArgs(
@@ -154,6 +223,14 @@ if __name__ == "__main__":
     # random_tune(
     #     classifier=ClassifierKind.LR, dataset=Dataset.Diabetes, n_runs=100, force=False
     # )
+    MAX_WORKERS = {
+        Dataset.UTIResistance: {
+            ClassifierKind.GBT: 30,
+            ClassifierKind.SVM: 8,
+            ClassifierKind.RF: 30,
+            ClassifierKind.LR: 8,
+        }
+    }
     for dataset in Dataset:
         if dataset not in [Dataset.MimicIV, Dataset.UTIResistance]:
             continue
@@ -162,7 +239,10 @@ if __name__ == "__main__":
             random_tune(
                 classifier=kind,
                 dataset=dataset,
-                metric=Metric.F1,
+                metric=Metric.Accuracy,
                 n_runs=250,
+                max_workers=20
+                if dataset is Dataset.MimicIV
+                else MAX_WORKERS[dataset][kind],
                 force=False,
             )

@@ -88,6 +88,9 @@ class NystroemHparams(Hparams):
             return self.defaults().to_dict()
         return hps
 
+    def set_n_jobs(self, n_jobs: int) -> None:
+        self.hparams["n_jobs"].value = n_jobs
+
     def ny_dict(self) -> Dict[str, Any]:
         full = self.to_dict()
         d = {"gamma": full["gamma"], "n_components": full["n_components"]}
