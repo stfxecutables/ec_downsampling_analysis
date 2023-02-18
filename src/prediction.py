@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 from numpy.random import Generator
 from pandas import DataFrame
+from scipy.stats.qmc import Halton
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from tqdm.contrib.concurrent import process_map
 
@@ -31,21 +33,47 @@ class ParallelArgs:
     dataset: Dataset
     fold: int
     run: int
-    downsample: bool
+    rep: int
+    downsample: Optional[float]
+    split: int  # split seed
     rng: Generator
+
+
+def pred_root(
+    dataset: Dataset,
+    kind: ClassifierKind,
+    downsample: bool,
+) -> Path:
+    root = PLAIN_OUTDIR if downsample is None else DOWNSAMPLE_OUTDIR
+    out = root / f"{dataset.value}/{kind.value}"
+    return ensure_dir(out)
+
+
+def pred_outdir(
+    dataset: Dataset,
+    kind: ClassifierKind,
+    downsample: bool,
+    rep: int,
+    run: int,
+) -> Path:
+    parent = pred_root(dataset=dataset, kind=kind, downsample=downsample)
+    out = parent / f"rep{rep:03d}/run{run:03d}"
+    return ensure_dir(out)
 
 
 def pred_outfile(
     dataset: Dataset,
     kind: ClassifierKind,
+    rep: int,
     run: int,
     fold: int,
-    downsample: Optional[float],
+    down: Optional[float],
 ) -> Path:
-    root = PLAIN_OUTDIR if downsample is None else DOWNSAMPLE_OUTDIR
-    down = "" if downsample is None else f"__{downsample:0.12f}"
-    out = root / f"{dataset}/{kind}/run{run:03d}_fold{fold}{down}.parquet"
-    ensure_dir(out.parent)
+    outdir = pred_outdir(
+        dataset=dataset, kind=kind, downsample=down is not None, rep=rep, run=run
+    )
+    d = "" if down is None else f"_{down:0.12f}"
+    out = outdir / f"fold{fold}{d}.parquet"
     return out
 
 
@@ -55,14 +83,15 @@ def compute_preds(args: ParallelArgs) -> None:
     try:
         dataset = args.dataset
         kind = args.kind
+        rep = args.rep
         run = args.run
         fold = args.fold
-        downsample = args.downsample
+        down = args.downsample
+        seed = args.split
         rng = args.rng
-        down = rng.uniform(0.5, 0.99) if downsample else None
 
         out = pred_outfile(
-            dataset=dataset, kind=kind, run=run, fold=fold, downsample=down
+            dataset=dataset, kind=kind, rep=rep, run=run, fold=fold, down=down
         )
         if out.exists():
             return
@@ -71,15 +100,14 @@ def compute_preds(args: ParallelArgs) -> None:
         hps = load_tuning_params(dataset=dataset, kind=kind)
         classifier = cls(hps)
         X, y = args.dataset.load()
-        y_sub = y
         if down is not None:
             sub_splitter = StratifiedShuffleSplit(
-                n_splits=1, train_size=down, random_state=rng.integers(0, 2**32 - 1)
+                n_splits=1, train_size=down, random_state=seed
             )
             sub_idx = next(sub_splitter.split(y, y))[0]
-            X, y_sub = X.iloc[sub_idx], y.iloc[sub_idx]
+            X, y = X.iloc[sub_idx], y.iloc[sub_idx]
         skf = StratifiedKFold(n_splits=5, shuffle=False)
-        idx_train, idx_test = list(skf.split(y_sub, y_sub))[args.fold]
+        idx_train, idx_test = list(skf.split(y, y))[args.fold]
         X_tr, y_tr = X.iloc[idx_train], y.iloc[idx_train]
         X_test, y_test = X.iloc[idx_test], y.iloc[idx_test]
         classifier.fit(X_tr, y_tr, rng=rng)
@@ -96,37 +124,59 @@ def evaluate_downsampling(
     classifier: ClassifierKind,
     dataset: Dataset,
     downsample: bool = True,
-    n_runs: int = 200,
+    n_reps: int = 100,
+    n_runs: int = 10,
     max_workers: int = 1,
 ) -> None:
+    """
+    Parameters
+    ----------
+    n_reps: int
+        Number of times to generate a percentage
+
+    n_runs: int
+        Number of times to run k-fold per repeat
+    """
     K = 5
+    # below just plucked from a random run of SeedSequence().entropy
+    entropy = 285216691326606742260051019197268485321
     xgb_jobs = 4 if dataset is Dataset.MimicIV else 8
-    run_seeds = np.random.SeedSequence().spawn(n_runs)
-    fold_rngs: List[List[Generator]] = []
-    for seed in run_seeds:
-        fold_rngs.append([np.random.default_rng(seed) for seed in seed.spawn(K)])
+    ss = np.random.SeedSequence(entropy=entropy)
+    seeds = ss.spawn(n_reps * n_runs * K)
+    base_rng = np.random.default_rng(ss)
+    p_seed = base_rng.integers(0, 2**32 - 1)
+    percents = np.array(Halton(d=1, seed=p_seed).random(n_reps)) * 0.50 + 0.50  # [0.5, 1]
+    percents = np.clip(percents, a_min=0.5, a_max=1.0)
+    rngs = np.array([np.random.default_rng(seed) for seed in seeds])
+    split_seeds = np.array([rng.integers(0, 2**32 - 1) for rng in rngs]).reshape(
+        n_reps, n_runs, K
+    )
+    rngs = rngs.reshape(n_reps, n_runs, K)
 
     pargs = []
     tqdm_args = dict(chunksize=1)
-    for run in range(n_runs):
-        n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
-        if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
-            n_workers = n_cpu // xgb_jobs
-            tqdm_args["max_workers"] = n_workers
-        else:
-            tqdm_args["max_workers"] = max_workers
+    n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
+    if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
+        n_workers = n_cpu // xgb_jobs
+        tqdm_args["max_workers"] = n_workers
+    else:
+        tqdm_args["max_workers"] = max_workers
 
-        for fold in range(K):
-            pargs.append(
-                ParallelArgs(
-                    kind=classifier,
-                    dataset=dataset,
-                    fold=fold,
-                    run=run,
-                    rng=fold_rngs[run][fold],
-                    downsample=downsample,
+    for rep in range(n_reps):
+        for run in range(n_runs):
+            for fold in range(K):
+                pargs.append(
+                    ParallelArgs(
+                        kind=classifier,
+                        dataset=dataset,
+                        fold=fold,
+                        rep=rep,
+                        run=run,
+                        rng=rngs[rep][run][fold],
+                        split=split_seeds[rep][run][fold],
+                        downsample=float(percents[rep]) if downsample else None,
+                    )
                 )
-            )
 
     process_map(
         compute_preds,
@@ -140,6 +190,7 @@ if __name__ == "__main__":
     evaluate_downsampling(
         classifier=ClassifierKind.GBT,
         dataset=Dataset.Diabetes,
+        n_reps=50,
         n_runs=10,
         max_workers=8,
         downsample=True,
