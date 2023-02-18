@@ -68,6 +68,24 @@ class Dataset(Enum):
         }
         return loaders[self]()
 
+    @staticmethod
+    def fast() -> List[Dataset]:
+        return [
+            Dataset.Diabetes,
+            Dataset.Transfusion,
+            Dataset.Parkinsons,
+            Dataset.SPECT,
+            Dataset.HeartFailure,
+            Dataset.Diabetes130,
+        ]
+
+    @staticmethod
+    def slow() -> List[Dataset]:
+        return [
+            Dataset.MimicIV,
+            Dataset.UTIResistance,
+        ]
+
 
 class ClassifierKind(Enum):
     GBT = "gbt"
