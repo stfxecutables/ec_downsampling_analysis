@@ -145,7 +145,9 @@ def evaluate_downsampling(
     seeds = ss.spawn(n_reps * n_runs * K)
     base_rng = np.random.default_rng(ss)
     p_seed = base_rng.integers(0, 2**32 - 1)
-    percents = np.array(Halton(d=1, seed=p_seed).random(n_reps)) * 0.50 + 0.50  # [0.5, 1]
+    percents = (
+        np.array(Halton(d=1, seed=p_seed).random(n_reps)) * 0.40 + 0.50
+    )  # [0.5, 0.9]
     percents = np.clip(percents, a_min=0.5, a_max=1.0)
     rngs = np.array([np.random.default_rng(seed) for seed in seeds])
     split_seeds = np.array([rng.integers(0, 2**32 - 1) for rng in rngs]).reshape(

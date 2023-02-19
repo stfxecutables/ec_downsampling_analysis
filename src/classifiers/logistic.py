@@ -32,7 +32,7 @@ class LogisticRegression(Classifier):
     def fit(self, X: DataFrame, y: Series, rng: Optional[Generator]) -> None:
         if rng is None:
             rng = np.random.default_rng()
-        self.classifier.fit(X, y)
+        self.classifier.fit(X.to_numpy(), y.to_numpy())
 
     # def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
     #     return float(self.classifier.score(X, y))

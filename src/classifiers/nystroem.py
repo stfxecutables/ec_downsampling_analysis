@@ -43,10 +43,10 @@ class NystroemSVM(Classifier):
             gamma=ny_args["gamma"],
             n_components=n_components,
         )
-        Xt = self.kernel_approximator.fit_transform(X=X)
-        self.classifier.fit(Xt, y)
+        Xt = self.kernel_approximator.fit_transform(X=X.to_numpy())
+        self.classifier.fit(Xt, y.to_numpy())
 
     def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
-        Xt = self.kernel_approximator.fit_transform(X=X)
+        Xt = self.kernel_approximator.fit_transform(X=X.to_numpy())
         y_pred = self.classifier.predict(Xt)
-        return metric.compute(y_true=y, y_pred=y_pred)
+        return metric.compute(y_true=y.to_numpy(), y_pred=y_pred)
