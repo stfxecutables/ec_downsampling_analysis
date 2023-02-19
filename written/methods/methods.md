@@ -22,16 +22,16 @@ medical information. We attempt to predict whether a subject is re-admitted
 30 days following initial admission (and remove features that allow trivial
 prediction of this variable).
 
-The "HeartFailure" dataset [@zhangzhonghengHospitalizedPatientsHeart;
-@zhangElectronicHealthcareRecords2021], made available through PhysioNet
+The "HeartFailure" dataset
+[@zhangzhonghengHospitalizedPatientsHeart;@zhangElectronicHealthcareRecords2021], made available through PhysioNet
 [@goldbergerPhysioBankPhysioToolkitPhysioNet2000], contains a large number of
 features related to medications, heart measurements, demographics, and other
 medical factors. We predict whether a patient will be re-admitted within 6
 months of the initial admission (and remove features that allow trivial
 prediction of this variable).
 
-The "UTIResistance" dataset [@oberstmichaelAMRUTIAntimicrobialResistance;
-kanjilalDecisionAlgorithmPromote2020], also available from PhysioNet
+The "UTIResistance" dataset
+[@oberstmichaelAMRUTIAntimicrobialResistance;@kanjilalDecisionAlgorithmPromote2020], also available from PhysioNet
 [@goldbergerPhysioBankPhysioToolkitPhysioNet2000], concerns antibiotic
 resistance observed in patients with urinary tract infections (UTI). The large
 number of sparse, binary indicator features comprise information such as
@@ -47,16 +47,16 @@ of data (previous medical history, demographics, triage information, etc). For e
 ES, a patient has a final disposition, which we assign the following labels,
 roughly according to severity / seriousness:
 
-|          Disposition          | Label |
-|:-----------------------------:|:-----:|
-|   "left without being seen"   |   0   |
-| "left against medical advice" |   0   |
-|           "eloped":           |   0   |
-|          "admitted":          |   1   |
-|          "transfer":          |   1   |
-|            "home":            |   2   |
-|          "expired":           |   3   |
-|           "other":            |   4   |
+|         Disposition         | Label |
+|:---------------------------:|:-----:|
+|   left without being seen   |   0   |
+| left against medical advice |   0   |
+|           eloped            |   0   |
+|          admitted           |   1   |
+|          transfer           |   1   |
+|            home             |   2   |
+|           expired           |   3   |
+|            other            |   4   |
 
 We use the triage information (which includes heartrate, blood pressure, oxygen
 saturation, subjective pain reports, and attending comments). We included
@@ -65,10 +65,9 @@ attending comments by counting the most common words used (e.g. "pain",
 each word. Details can be found in the source code.
 
 
-
-
-After removing or median-interpolating missing values, non-categorical features
-were were standardized prior to fitting with predictive models.
+After removing or median-interpolating missing values, depending on the amount
+missing, non-categorical features were were standardized prior to fitting with
+predictive models.
 
 ## Classifiers
 
