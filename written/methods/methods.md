@@ -1,5 +1,75 @@
 # Methods
 
+## Datasets
+
+| name          | n_samples | n_features | n_class | majority |
+|:--------------|----------:|-----------:|--------:|---------:|
+| Diabetes      |       768 |          8 |       2 |     0.65 |
+| Transfusion   |       748 |          4 |       2 |     0.76 |
+| Parkinsons    |       195 |         22 |       2 |     0.75 |
+| SPECT         |       267 |         22 |       2 |     0.79 |
+| Diabetes130   |    101766 |         48 |       2 |     0.89 |
+| HeartFailure  |      2008 |        148 |       2 |     0.62 |
+| MimicIV       |    369618 |        118 |       3 |      0.6 |
+| UTIResistance |    100769 |        788 |       2 |     0.52 |
+
+The "Diabetes130" dataset was originally collected by
+@strackImpactHbA1cMeasurement2014, and is publicly available on the OpenML
+[@vanschorenOpenMLNetworkedScience2014] platform. The data are derived from
+130 US Hospitals over a period of 10 years, and the features comprise things
+like race, gender, number of lab procedures, diagnoses, and other pieces of
+medical information. We attempt to predict whether a subject is re-admitted
+30 days following initial admission (and remove features that allow trivial
+prediction of this variable).
+
+The "HeartFailure" dataset [@zhangzhonghengHospitalizedPatientsHeart;
+@zhangElectronicHealthcareRecords2021], made available through PhysioNet
+[@goldbergerPhysioBankPhysioToolkitPhysioNet2000], contains a large number of
+features related to medications, heart measurements, demographics, and other
+medical factors. We predict whether a patient will be re-admitted within 6
+months of the initial admission (and remove features that allow trivial
+prediction of this variable).
+
+The "UTIResistance" dataset [@oberstmichaelAMRUTIAntimicrobialResistance;
+kanjilalDecisionAlgorithmPromote2020], also available from PhysioNet
+[@goldbergerPhysioBankPhysioToolkitPhysioNet2000], concerns antibiotic
+resistance observed in patients with urinary tract infections (UTI). The large
+number of sparse, binary indicator features comprise information such as
+hospital floor, ward, previous instance of resistance, medications
+administered, demographic information, and other medically-relevant indicators.
+Binary resistance categories are available for four antibiotic types, however,
+we combine this into a single binary variable representing any observed
+antibiotic resistance, and use this for prediction.
+
+The "MimicIV" emergency stay (ES) dataset [@johnsonalistairMIMICIVED], also available from PhysioNet
+[@goldbergerPhysioBankPhysioToolkitPhysioNet2000], is comprised of multiple tables
+of data (previous medical history, demographics, triage information, etc). For each
+ES, a patient has a final disposition, which we assign the following labels,
+roughly according to severity / seriousness:
+
+|          Disposition          | Label |
+|:-----------------------------:|:-----:|
+|   "left without being seen"   |   0   |
+| "left against medical advice" |   0   |
+|           "eloped":           |   0   |
+|          "admitted":          |   1   |
+|          "transfer":          |   1   |
+|            "home":            |   2   |
+|          "expired":           |   3   |
+|           "other":            |   4   |
+
+We use the triage information (which includes heartrate, blood pressure, oxygen
+saturation, subjective pain reports, and attending comments). We included
+attending comments by counting the most common words used (e.g. "pain",
+"stomach", "abnormal", "injury", etc.) and then creating indicator features for
+each word. Details can be found in the source code.
+
+
+
+
+After removing or median-interpolating missing values, non-categorical features
+were were standardized prior to fitting with predictive models.
+
 ## Classifiers
 
 We fit four classifiers: support-vector machine with radial basis function
@@ -112,138 +182,138 @@ which is useful for directly relating individual EC values to individual accurac
 Correlations (Pearson's $r$) between $\alpha_{ij}$ and $\text{EC}_{ij}$ values:
 
 
-| data         | classifier   |      r |     p |
-|:-------------|:-------------|-------:|------:|
-| Diabetes     | GBT          | -0.881 | 0.000 |
-|              | LR           | -0.904 | 0.000 |
-|              | RF           | -0.497 | 0.000 |
-|              | SVM          | -0.607 | 0.000 |
-|              |              |        |       |
-| Diabetes130  | GBT          |  0.776 | 0.000 |
-|              | LR           |  0.000 | 1.000 |
-|              | RF           |  0.000 | 1.000 |
-|              | SVM          |  0.004 | 0.719 |
-|              |              |        |       |
-| HeartFailure | GBT          | -0.479 | 0.000 |
-|              | LR           | -0.513 | 0.000 |
-|              | RF           | -0.347 | 0.000 |
-|              | SVM          |  0.116 | 0.000 |
-|              |              |        |       |
-| Parkinsons   | GBT          | -0.734 | 0.000 |
-|              | LR           | -0.700 | 0.000 |
-|              | RF           |  0.021 | 0.044 |
-|              | SVM          | -0.792 | 0.000 |
-|              |              |        |       |
-| SPECT        | GBT          | -0.530 | 0.000 |
-|              | LR           | -0.565 | 0.000 |
-|              | RF           | -0.355 | 0.000 |
-|              | SVM          |  0.126 | 0.000 |
-|              |              |        |       |
-| Transfusion  | GBT          |  0.251 | 0.000 |
-|              | LR           |  0.229 | 0.000 |
-|              | RF           |  0.632 | 0.000 |
-|              | SVM          | -0.412 | 0.000 |
+| data         | classifier |      r |     p |
+|:-------------|:-----------|-------:|------:|
+| Diabetes     | GBT        | -0.881 | 0.000 |
+|              | LR         | -0.904 | 0.000 |
+|              | RF         | -0.497 | 0.000 |
+|              | SVM        | -0.607 | 0.000 |
+|              |            |        |       |
+| Diabetes130  | GBT        |  0.776 | 0.000 |
+|              | LR         |  0.000 | 1.000 |
+|              | RF         |  0.000 | 1.000 |
+|              | SVM        |  0.004 | 0.719 |
+|              |            |        |       |
+| HeartFailure | GBT        | -0.479 | 0.000 |
+|              | LR         | -0.513 | 0.000 |
+|              | RF         | -0.347 | 0.000 |
+|              | SVM        |  0.116 | 0.000 |
+|              |            |        |       |
+| Parkinsons   | GBT        | -0.734 | 0.000 |
+|              | LR         | -0.700 | 0.000 |
+|              | RF         |  0.021 | 0.044 |
+|              | SVM        | -0.792 | 0.000 |
+|              |            |        |       |
+| SPECT        | GBT        | -0.530 | 0.000 |
+|              | LR         | -0.565 | 0.000 |
+|              | RF         | -0.355 | 0.000 |
+|              | SVM        |  0.126 | 0.000 |
+|              |            |        |       |
+| Transfusion  | GBT        |  0.251 | 0.000 |
+|              | LR         |  0.229 | 0.000 |
+|              | RF         |  0.632 | 0.000 |
+|              | SVM        | -0.412 | 0.000 |
 
 Correlations (Pearson's $r$) between $\bar{a}$ and $\overline{\text{EC}}$ values:
 
-| data         | classifier   |      r |     p |
-|:-------------|:-------------|-------:|------:|
-| Diabetes     | GBT          | -0.582 | 0.000 |
-|              | LR           | -0.584 | 0.000 |
-|              | RF           |  0.220 | 0.002 |
-|              | SVM          | -0.917 | 0.000 |
-|              |              |        |       |
-| Diabetes130  | GBT          |  0.663 | 0.000 |
-|              | LR           |  0.000 | 1.000 |
-|              | RF           |  0.000 | 1.000 |
-|              | SVM          | -0.038 | 0.596 |
-|              |              |        |       |
-| HeartFailure | GBT          | -0.086 | 0.225 |
-|              | LR           | -0.098 | 0.169 |
-|              | RF           | -0.081 | 0.254 |
-|              | SVM          |  0.373 | 0.000 |
-|              |              |        |       |
-| Parkinsons   | GBT          | -0.480 | 0.000 |
-|              | LR           | -0.405 | 0.000 |
-|              | RF           |  0.507 | 0.000 |
-|              | SVM          | -0.891 | 0.000 |
-|              |              |        |       |
-| SPECT        | GBT          | -0.114 | 0.107 |
-|              | LR           | -0.111 | 0.116 |
-|              | RF           |  0.102 | 0.150 |
-|              | SVM          |  0.404 | 0.000 |
-|              |              |        |       |
-| Transfusion  | GBT          |  0.365 | 0.000 |
-|              | LR           |  0.404 | 0.000 |
-|              | RF           |  0.611 | 0.000 |
-|              | SVM          | -0.635 | 0.000 |
+| data         | classifier |      r |     p |
+|:-------------|:-----------|-------:|------:|
+| Diabetes     | GBT        | -0.582 | 0.000 |
+|              | LR         | -0.584 | 0.000 |
+|              | RF         |  0.220 | 0.002 |
+|              | SVM        | -0.917 | 0.000 |
+|              |            |        |       |
+| Diabetes130  | GBT        |  0.663 | 0.000 |
+|              | LR         |  0.000 | 1.000 |
+|              | RF         |  0.000 | 1.000 |
+|              | SVM        | -0.038 | 0.596 |
+|              |            |        |       |
+| HeartFailure | GBT        | -0.086 | 0.225 |
+|              | LR         | -0.098 | 0.169 |
+|              | RF         | -0.081 | 0.254 |
+|              | SVM        |  0.373 | 0.000 |
+|              |            |        |       |
+| Parkinsons   | GBT        | -0.480 | 0.000 |
+|              | LR         | -0.405 | 0.000 |
+|              | RF         |  0.507 | 0.000 |
+|              | SVM        | -0.891 | 0.000 |
+|              |            |        |       |
+| SPECT        | GBT        | -0.114 | 0.107 |
+|              | LR         | -0.111 | 0.116 |
+|              | RF         |  0.102 | 0.150 |
+|              | SVM        |  0.404 | 0.000 |
+|              |            |        |       |
+| Transfusion  | GBT        |  0.365 | 0.000 |
+|              | LR         |  0.404 | 0.000 |
+|              | RF         |  0.611 | 0.000 |
+|              | SVM        | -0.635 | 0.000 |
 
 Correlations between downsampling percentage ($r$) and $\text{EC}_{ij}$s:
 
-| data         | classifier   |      r |     p |
-|:-------------|:-------------|-------:|------:|
-| Diabetes     | GBT          | -0.015 | 0.166 |
-|              | LR           |  0.011 | 0.302 |
-|              | RF           | -0.284 | 0.000 |
-|              | SVM          |  0.009 | 0.387 |
-|              |              |        |       |
-| Diabetes130  | GBT          |  0.095 | 0.000 |
-|              | LR           |  0.000 | 1.000 |
-|              | RF           |  0.000 | 1.000 |
-|              | SVM          | -0.028 | 0.007 |
-|              |              |        |       |
-| HeartFailure | GBT          |  0.100 | 0.000 |
-|              | LR           |  0.192 | 0.000 |
-|              | RF           | -0.032 | 0.002 |
-|              | SVM          |  0.152 | 0.000 |
-|              |              |        |       |
-| Parkinsons   | GBT          | -0.085 | 0.000 |
-|              | LR           | -0.002 | 0.829 |
-|              | RF           | -0.488 | 0.000 |
-|              | SVM          | -0.018 | 0.094 |
-|              |              |        |       |
-| SPECT        | GBT          |  0.064 | 0.000 |
-|              | LR           |  0.038 | 0.000 |
-|              | RF           | -0.088 | 0.000 |
-|              | SVM          | -0.152 | 0.000 |
-|              |              |        |       |
-| Transfusion  | GBT          | -0.006 | 0.542 |
-|              | LR           |  0.302 | 0.000 |
-|              | RF           |  0.162 | 0.000 |
-|              | SVM          |  0.021 | 0.047 |
+| data         | classifier |      r |     p |
+|:-------------|:-----------|-------:|------:|
+| Diabetes     | GBT        | -0.015 | 0.166 |
+|              | LR         |  0.011 | 0.302 |
+|              | RF         | -0.284 | 0.000 |
+|              | SVM        |  0.009 | 0.387 |
+|              |            |        |       |
+| Diabetes130  | GBT        |  0.095 | 0.000 |
+|              | LR         |  0.000 | 1.000 |
+|              | RF         |  0.000 | 1.000 |
+|              | SVM        | -0.028 | 0.007 |
+|              |            |        |       |
+| HeartFailure | GBT        |  0.100 | 0.000 |
+|              | LR         |  0.192 | 0.000 |
+|              | RF         | -0.032 | 0.002 |
+|              | SVM        |  0.152 | 0.000 |
+|              |            |        |       |
+| Parkinsons   | GBT        | -0.085 | 0.000 |
+|              | LR         | -0.002 | 0.829 |
+|              | RF         | -0.488 | 0.000 |
+|              | SVM        | -0.018 | 0.094 |
+|              |            |        |       |
+| SPECT        | GBT        |  0.064 | 0.000 |
+|              | LR         |  0.038 | 0.000 |
+|              | RF         | -0.088 | 0.000 |
+|              | SVM        | -0.152 | 0.000 |
+|              |            |        |       |
+| Transfusion  | GBT        | -0.006 | 0.542 |
+|              | LR         |  0.302 | 0.000 |
+|              | RF         |  0.162 | 0.000 |
+|              | SVM        |  0.021 | 0.047 |
 
 Correlations between downsampling percentage ($r$) and $\overline{\text{EC}}$s:
 
-| data         | classifier   |      r |     p |
-|:-------------|:-------------|-------:|------:|
-| Diabetes     | GBT          | -0.099 | 0.163 |
-|              | LR           |  0.077 | 0.281 |
-|              | RF           | -0.673 | 0.000 |
-|              | SVM          |  0.032 | 0.652 |
-|              |              |        |       |
-| Diabetes130  | GBT          |  0.220 | 0.002 |
-|              | LR           |  0.000 | 1.000 |
-|              | RF           |  0.000 | 1.000 |
-|              | SVM          | -0.063 | 0.373 |
-|              |              |        |       |
-| HeartFailure | GBT          |  0.288 | 0.000 |
-|              | LR           |  0.558 | 0.000 |
-|              | RF           | -0.092 | 0.196 |
-|              | SVM          |  0.484 | 0.000 |
-|              |              |        |       |
-| Parkinsons   | GBT          | -0.325 | 0.000 |
-|              | LR           | -0.009 | 0.894 |
-|              | RF           | -0.800 | 0.000 |
-|              | SVM          | -0.081 | 0.255 |
-|              |              |        |       |
-| SPECT        | GBT          |  0.227 | 0.001 |
-|              | LR           |  0.148 | 0.037 |
-|              | RF           | -0.243 | 0.001 |
-|              | SVM          | -0.446 | 0.000 |
-|              |              |        |       |
-| Transfusion  | GBT          | -0.015 | 0.837 |
-|              | LR           |  0.624 | 0.000 |
-|              | RF           |  0.349 | 0.000 |
-|              | SVM          |  0.068 | 0.339 |
+| data         | classifier |      r |     p |
+|:-------------|:-----------|-------:|------:|
+| Diabetes     | GBT        | -0.099 | 0.163 |
+|              | LR         |  0.077 | 0.281 |
+|              | RF         | -0.673 | 0.000 |
+|              | SVM        |  0.032 | 0.652 |
+|              |            |        |       |
+| Diabetes130  | GBT        |  0.220 | 0.002 |
+|              | LR         |  0.000 | 1.000 |
+|              | RF         |  0.000 | 1.000 |
+|              | SVM        | -0.063 | 0.373 |
+|              |            |        |       |
+| HeartFailure | GBT        |  0.288 | 0.000 |
+|              | LR         |  0.558 | 0.000 |
+|              | RF         | -0.092 | 0.196 |
+|              | SVM        |  0.484 | 0.000 |
+|              |            |        |       |
+| Parkinsons   | GBT        | -0.325 | 0.000 |
+|              | LR         | -0.009 | 0.894 |
+|              | RF         | -0.800 | 0.000 |
+|              | SVM        | -0.081 | 0.255 |
+|              |            |        |       |
+| SPECT        | GBT        |  0.227 | 0.001 |
+|              | LR         |  0.148 | 0.037 |
+|              | RF         | -0.243 | 0.001 |
+|              | SVM        | -0.446 | 0.000 |
+|              |            |        |       |
+| Transfusion  | GBT        | -0.015 | 0.837 |
+|              | LR         |  0.624 | 0.000 |
+|              | RF         |  0.349 | 0.000 |
+|              | SVM        |  0.068 | 0.339 |
 
 # References

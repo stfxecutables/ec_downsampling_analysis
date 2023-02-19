@@ -367,6 +367,21 @@ def print_tabular_info() -> None:
         )
     )
 
+def print_data_tables() -> None:
+    dfs = []
+    for dataset in tqdm(Dataset, total=len(Dataset), desc="Collecting dataset stats"):
+        X, y = dataset.load()
+        unq, cnts = np.unique(y, return_counts=True)
+        dfs.append(DataFrame({
+            "name": dataset.name,
+            "n_samples": len(y),
+            "n_features": X.shape[1],
+            "n_class": len(unq),
+            "majority": np.round(np.max(cnts) / len(y), 2),
+        }, index=[0]))
+    df = pd.concat(dfs, axis=0, ignore_index=True)
+    print(df.to_markdown(index=False))
+
 
 if __name__ == "__main__":
     DATASETS = [
@@ -376,7 +391,8 @@ if __name__ == "__main__":
         Dataset.Transfusion,
         Dataset.HeartFailure,
     ]
-    print_tabular_info()
+    print_data_tables()
+    # print_tabular_info()
     # for dataset in DATASETS:
     #     for kind in ClassifierKind:
     #         summarize_results(dataset=dataset, kind=kind, downsample=True)
