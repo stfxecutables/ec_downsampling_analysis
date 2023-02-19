@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=def-jlevman
-#SBATCH --time=00-00:30:00
+#SBATCH --time=00-00:45:00
 #SBATCH --job-name=val_slow
 #SBATCH --output=eval_slow_%j__%A_%a.out
 #SBATCH --array=0-799
