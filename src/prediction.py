@@ -127,6 +127,7 @@ def evaluate_downsampling(
     n_reps: int = 100,
     n_runs: int = 10,
     max_workers: int = 1,
+    only_rep: Optional[int] = None,
 ) -> None:
     """
     Parameters
@@ -165,6 +166,10 @@ def evaluate_downsampling(
         tqdm_args["max_workers"] = max_workers
 
     for rep in range(n_reps):
+        if only_rep is not None:
+            if rep != only_rep:
+                continue
+
         for run in range(n_runs):
             for fold in range(K):
                 pargs.append(

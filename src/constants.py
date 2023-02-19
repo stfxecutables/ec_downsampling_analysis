@@ -41,7 +41,6 @@ DOWNSAMPLE_OUTDIR = ensure_dir(PREDS_OUTDIR / "downsample")
 FEATURE_SELECTION_OUTDIR = ensure_dir(PREDS_OUTDIR / "feature_selection")
 PLAIN_OUTDIR = ensure_dir(PREDS_OUTDIR / "no_downsample")
 
-DOWNSAMPLE_PLOT_OUTDIR = ensure_dir(PLOTS / "downsample")
 DOWNSAMPLE_RESULTS_DIR = ensure_dir(RESULTS / "dfs")
 FEATURE_PLOT_OUTDIR = ensure_dir(FEATURE_SELECTION_OUTDIR / "plots")
 FEATURE_RESULTS_DIR = ensure_dir(ROOT / "results/dfs")
