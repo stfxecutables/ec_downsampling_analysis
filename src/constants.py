@@ -32,6 +32,7 @@ def ensure_dir(path: Path) -> Path:
 DATA: Path = ensure_dir(ROOT / "data")
 RESULTS = ensure_dir(ROOT / "results")
 PLOTS = ensure_dir(RESULTS / "plots")
+TABLES = ensure_dir(RESULTS / "tables")
 
 HP_OUTDIR = ensure_dir(RESULTS / "hps")
 CKPT_OUTDIR = ensure_dir(RESULTS / "ckpts")

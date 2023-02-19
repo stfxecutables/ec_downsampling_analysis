@@ -45,7 +45,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 
-from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, PLOTS, ensure_dir
+from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, PLOTS, TABLES, ensure_dir
 from src.enumerables import ClassifierKind, Dataset, Metric
 from src.hparams.gbt import XGBoostHparams
 from src.hparams.hparams import Hparams
@@ -177,9 +177,7 @@ def load_preds(
 @MEMOIZER.cache
 def get_rep_dfs(reps: List[Repeat]) -> Tuple[DataFrame, DataFrame]:
     df_pairs, df_runs = [], []
-    for rep in tqdm(
-        reps, desc=f"Summarizing predictions (data={dataset.name}, cls={kind.name})"
-    ):
+    for rep in tqdm(reps, desc="Summarizing predictions"):
         pairwise, runwise = rep.stats()
         df_pair = pairwise.copy()
         df_pair["rep"] = rep.id
@@ -293,13 +291,125 @@ def summarize_results(
     plt.close()
 
 
+def make_table(
+    downsample: bool = True, force: bool = False
+) -> Tuple[DataFrame, DataFrame]:
+    pairs_out = TABLES / "all_pairs.json"
+    runs_out = TABLES / "all_runs.json"
+    if pairs_out.exists() and runs_out.exists() and not force:
+        df_pair = pd.read_json(pairs_out)
+        df_run = pd.read_json(runs_out)
+        return df_pair, df_run
+
+    df_pairs, df_runs = [], []
+    for dataset in DATASETS:
+        for kind in ClassifierKind:
+            reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
+            df_pair, df_run = get_rep_dfs(reps)
+            df_pair["down"] *= 100
+            df_run["down"] *= 100
+            renames = {"acc": "Accuracy", "ec": "EC", "down": "Downsample (%)"}
+            df_pair.rename(columns=renames, inplace=True)
+            df_run.rename(columns=renames, inplace=True)
+            df_pair["data"] = dataset.name
+            df_run["data"] = dataset.name
+            df_pair["classifier"] = kind.name
+            df_run["classifier"] = kind.name
+            df_pairs.append(df_pair)
+            df_runs.append(df_run)
+    df_pair = pd.concat(df_pairs, axis=0, ignore_index=True)
+    df_run = pd.concat(df_runs, axis=0, ignore_index=True)
+    df_pair.to_json(pairs_out)
+    print(f"Saved pairs data to {pairs_out}")
+    df_run.to_json(runs_out)
+    print(f"Saved runs data to {runs_out}")
+    return df_pair, df_run
+
+
+def corr_stats(grp: DataFrame) -> DataFrame:
+    acc = grp["Accuracy"]
+    ec = grp["EC"]
+    res = LinResult(x=acc, y=ec)
+    return DataFrame({"r": res.r, "p": res.p}, index=[0])
+
+def corr_ec_down(grp: DataFrame) -> DataFrame:
+    down = grp["Downsample (%)"]
+    ec = grp["EC"]
+    res = LinResult(x=down, y=ec)
+    return DataFrame({"r": res.r, "p": res.p}, index=[0])
+
+
+def print_tabular_info() -> None:
+    df_pair, df_run = make_table()
+    pair_corrs = (
+        df_pair.drop(columns=["Downsample (%)", "rep"])
+        .groupby(["data", "classifier"])
+        .apply(corr_stats)
+    )
+
+    print(
+        pair_corrs.droplevel(2)
+        .reset_index()
+        .to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"])
+    )
+
+    acc_means = (
+        df_run.drop(columns="Downsample (%)")
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    ec_means = (
+        df_pair.drop(columns=["Downsample (%)", "Accuracy"])
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    downs = (
+        df_pair.drop(columns=["EC", "Accuracy"])
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    means = pd.concat([acc_means, ec_means], axis=1)
+    mean_corrs = (
+        means.droplevel(2).groupby(["data", "classifier"]).apply(corr_stats).droplevel(2)
+    )
+    print(
+        mean_corrs.reset_index().to_markdown(
+            index=False, floatfmt=["", "", "0.3f", "0.3f"]
+        )
+    )
+
+    pair_down_corrs = (
+        df_pair.drop(columns=["Accuracy", "rep"])
+        .groupby(["data", "classifier"])
+        .apply(corr_ec_down).droplevel(2)
+    )
+    print(
+        pair_down_corrs.reset_index().to_markdown(
+            index=False, floatfmt=["", "", "0.3f", "0.3f"]
+        )
+    )
+
+    df = pd.concat([ec_means, downs], axis=1).droplevel(2)
+    mean_down_corrs = (
+        df.groupby(["data", "classifier"]).apply(corr_ec_down).droplevel(2)
+
+    )
+    print(
+        mean_down_corrs.reset_index().to_markdown(
+            index=False, floatfmt=["", "", "0.3f", "0.3f"]
+        )
+    )
+
+
 if __name__ == "__main__":
-    for dataset in [
+    DATASETS = [
         Dataset.Diabetes,
         Dataset.Parkinsons,
         Dataset.SPECT,
         Dataset.Transfusion,
         Dataset.HeartFailure,
-    ]:
-        for kind in ClassifierKind:
-            summarize_results(dataset=dataset, kind=kind, downsample=True)
+    ]
+    print_tabular_info()
+    # for dataset in DATASETS:
+    #     for kind in ClassifierKind:
+    #         summarize_results(dataset=dataset, kind=kind, downsample=True)
