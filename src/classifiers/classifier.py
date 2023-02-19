@@ -33,8 +33,8 @@ class Classifier(ABC):
         ...
 
     def score(self, X: DataFrame, y: Series, metric: Metric = Metric.Accuracy) -> float:
-        y_pred = self.classifier.predict(X)
-        return metric.compute(y_true=y, y_pred=y_pred)
+        y_pred = self.classifier.predict(X.to_numpy())
+        return metric.compute(y_true=y.to_numpy(), y_pred=y_pred)
 
     def predict(self, X: DataFrame) -> ndarray:
-        return np.ravel(self.classifier.predict(X))
+        return np.ravel(self.classifier.predict(X.to_numpy()))

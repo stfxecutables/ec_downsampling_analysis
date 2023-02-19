@@ -30,12 +30,18 @@ from typing import (
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sbn
+from joblib import Memory
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
 from numpy.random import Generator
+from numpy.typing import ArrayLike
 from pandas import DataFrame, Series
+from scipy.stats import linregress, pearsonr
+from seaborn import FacetGrid
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
+from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 
@@ -57,11 +63,41 @@ from src.utils import (
     tuning_outdir,
 )
 
+MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
+
+
+@dataclass
+class LinResult:
+    def __init__(self, x: ArrayLike, y: ArrayLike) -> None:
+        result = linregress(x=x, y=y)
+        self.m: float = result.slope  # type: ignore
+        self.p: float = result.pvalue  # type: ignore
+        self.r: float = result.rvalue  # type: ignore
+        self.b: float = result.intercept  # type: ignore
+        self.stderr: float = result.stderr  # type: ignore
+        self.x_min = np.min(x)
+        self.x_max = np.max(x)
+
+    def line(self) -> Tuple[ndarray, ndarray]:
+        x = np.linspace(self.x_min, self.x_max, 1000)
+        return x, self.b + self.m * x
+
 
 @dataclass
 class Run:
     df: DataFrame
     down: float
+
+
+@MEMOIZER.cache
+def full_df(runs: Dict[int, Run]) -> DataFrame:
+    y_true = runs[0].df["y_true"]
+    preds = []
+    for i, run in runs.items():
+        pred = run.df["y_pred"]
+        pred.name = f"pred{i}"
+        preds.append(pred)
+    return pd.concat([*preds, y_true], axis=1)
 
 
 @dataclass
@@ -71,13 +107,7 @@ class Repeat:
     down: float
 
     def full_df(self) -> DataFrame:
-        y_true = self.runs[0].df["y_true"]
-        preds = []
-        for i, run in self.runs.items():
-            pred = run.df["y_pred"]
-            pred.name = f"pred{i}"
-            preds.append(pred)
-        return pd.concat([*preds, y_true], axis=1)
+        return full_df(self.runs)
 
     def stats(self) -> Tuple[DataFrame, DataFrame]:
         """
@@ -111,25 +141,14 @@ class Repeat:
 DfPlus = Dict[str, Union[DataFrame, float]]
 
 
-def consolidate_folds(
-    dfs: Dict[int, Dict[int, Dict[int, DfPlus]]]
-) -> Dict[int, DataFrame]:
-    consolidated = {}
-    for rep, runs in dfs.items():
-        for run, folds in runs.items():
-            df = pd.concat(folds.values(), axis=0, ignore_index=True)
-            df.sort_values(by="idx")
-            consolidated[run] = df
-    return consolidated
-
-
+@MEMOIZER.cache
 def load_preds(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True
-) -> Dict[int, Repeat]:
+) -> List[Repeat]:
     outdir = pred_root(dataset=dataset, kind=kind, downsample=True)
     rep_dirs = sorted(outdir.glob("rep*"))
-    reps: Dict[int, Repeat] = {}
-    for rep, rep_dir in enumerate(rep_dirs):
+    reps: List[Repeat] = []
+    for rep_dir in tqdm(rep_dirs, desc="Loading predictions"):
         run_dirs = sorted(rep_dir.glob("run*"))
         runs: Dict[int, Run] = {}
         for r, run_dir in enumerate(run_dirs):
@@ -140,38 +159,121 @@ def load_preds(
             down = float(fold_pqs[0].stem.split("_")[1]) if downsample else 1.0
             runs[r] = Run(df=df, down=down)
         rep_id = int(rep_dir.name.replace("rep", ""))
-        reps[rep] = Repeat(id=rep_id, runs=runs, down=runs[0].down)
+        reps.append(Repeat(id=rep_id, runs=runs, down=runs[0].down))
     return reps
 
-    parquets = sorted(outdir.glob("*.parquet"))
-    rep_ids = [int(p.stem.split("_")[0].replace("rep", "")) for p in parquets]
-    fold_dfs: Dict[int, Dict[int, Dict[int, DfPlus]]]
-    fold_dfs = {}
-    reps: Dict[int, Repeat] = {rid: Repeat(id=rid, runs={}) for rid in rep_ids}
-    for path in parquets:
-        if downsample:
-            rep_, run_, fold_, down = path.stem.split("_")
-            ds = float(down)
-        else:
-            rep_, run_, fold_ = path.stem.split("_")
-            ds = 100.0
-        rep_id = int(rep_.replace("rep", ""))
-        rep = reps[rep_id]
 
-        run_id = int(run_.replace("run", ""))
-        fold_id = int(fold_.replace("fold", ""))
+@MEMOIZER.cache
+def get_rep_dfs(reps: List[Repeat]) -> Tuple[DataFrame, DataFrame]:
+    df_pairs, df_runs = [], []
+    for rep in tqdm(reps, desc="Summarizing predictions"):
+        pairwise, runwise = rep.stats()
+        df_pair = pairwise.copy()
+        df_pair["rep"] = rep.id
+        df_pair["down"] = rep.down
+        df_run = runwise.copy()
+        df_run["rep"] = rep.id
+        df_run["down"] = rep.down
+        df_pairs.append(df_pair)
+        df_runs.append(df_run)
 
-        if rep not in fold_dfs:
-            fold_dfs[rep] = {}
-        if run not in fold_dfs[rep]:
-            fold_dfs[rep][run] = {}
-        fold_dfs[rep][run][fold] = {"df": pd.read_parquet(path), "down": ds}
-    dfs = consolidate_folds(fold_dfs)
-    return dfs
+    df_pair = pd.concat(df_pairs, axis=0, ignore_index=True)
+    df_run = pd.concat(df_runs, axis=0, ignore_index=True)
+    return df_pair, df_run
+
+
+def summarize_results(
+    dataset: Dataset, kind: ClassifierKind, downsample: bool = True
+) -> Tuple[DataFrame, DataFrame]:
+    LW = 1.0
+    reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
+    df_pair, df_run = get_rep_dfs(reps)
+    df_pair["down"] *= 100
+    df_run["down"] *= 100
+    renames = {"acc": "Accuracy", "ec": "EC", "down": "Downsample (%)"}
+    df_pair.rename(columns=renames, inplace=True)
+    df_run.rename(columns=renames, inplace=True)
+
+    means = df_pair.groupby("rep").mean()  # columns = ["acc", "ec", "down"]
+    acc_ec = LinResult(x=means["Accuracy"], y=means["EC"])
+    down_acc = LinResult(x=means["Downsample (%)"], y=means["Accuracy"])
+    down_ec = LinResult(x=means["Downsample (%)"], y=means["EC"])
+
+    grid: FacetGrid
+    ax: Axes
+    args = dict(height=3.5, aspect=1.5, color="black")
+
+    grid = sbn.relplot(data=means, x="Accuracy", y="EC", size="Downsample (%)", **args)
+    grid.fig.text(x=0.7, y=0.85, s=f"r={acc_ec.r:0.2f}, p={acc_ec.p:0.2e}")
+    ax = grid.fig.axes[0]
+    ax.plot(*acc_ec.line(), color="red", lw=LW)
+    ax.set_title("Mean Pairwise Acc Means vs. Run Mean EC")
+    ax.set_xlabel("Run Mean Pairwise Mean Accuracy")
+    ax.set_ylabel("Run Mean EC")
+    grid.fig.tight_layout()
+    grid.fig.subplots_adjust(right=0.85)
+
+    # No effect of sample size on EC
+    grid = sbn.relplot(data=means, x="Downsample (%)", y="EC", size="Accuracy", **args)
+    ax = grid.fig.axes[0]
+    ax.plot(*down_ec.line(), color="red", lw=LW)
+    ax.set_title("Mean Pairwise Accuracy Means vs. Run Mean EC")
+    ax.set_xlabel("Downsampling proportion")
+    ax.set_ylabel("Run Mean EC")
+    grid.fig.text(x=0.7, y=0.85, s=f"r={down_ec.r:0.2f}, p={down_ec.p:0.2e}")
+    grid.fig.tight_layout()
+    grid.fig.subplots_adjust(right=0.85)
+
+    # effect of sample size on acc
+    grid = sbn.relplot(data=means, x="Downsample (%)", y="Accuracy", size="EC", **args)
+    ax = grid.fig.axes[0]
+    ax.set_title("Effect of Downsampling on Accuracy")
+    ax.plot(*down_acc.line(), color="red", lw=LW)
+    ax.set_title("Mean Pairwise Accuracy Means vs. Run Mean EC")
+    ax.set_xlabel("Downsampling proportion")
+    ax.set_ylabel("Run Mean Pairwise Mean Accuracy")
+    grid.fig.text(x=0.7, y=0.85, s=f"r={down_acc.r:0.2f}, p={down_acc.p:0.2e}")
+    grid.fig.tight_layout()
+    grid.fig.subplots_adjust(right=0.85)
+
+    plt.show(block=False)
+
+    mean_accs = df_run.groupby("rep").mean()["Accuracy"]
+    downs = df_run.groupby("rep").mean()["Downsample (%)"]
+    downs.name = "Downsample (%)"
+    mean_ecs = df_pair.groupby("rep").mean()["EC"]
+    macc_mec = LinResult(x=mean_accs, y=mean_ecs)
+    grid = sbn.relplot(x=mean_accs, y=mean_ecs, size=downs, **args)
+    ax: Axes = grid.fig.axes[0]
+    ax.plot(*macc_mec.line(), color="red", lw=LW)
+    ax.set_title("Mean Accuracy vs. Mean EC")
+    ax.set_xlabel("Run Mean Accuracy")
+    ax.set_ylabel("Run Mean Error consistency")
+    grid.fig.text(x=0.7, y=0.85, s=f"r={macc_mec.r:0.2f}, p={macc_mec.p:0.2e}")
+    grid.fig.tight_layout()
+    grid.fig.subplots_adjust(right=0.85)
+    plt.show(block=False)
+
+    all_accs = df_pair["Accuracy"]
+    all_ecs = df_pair["EC"]
+    downs = df_pair["Downsample (%)"]
+    downs.name = "Downsample (%)"
+    aacc_aec = LinResult(x=all_accs, y=all_ecs)
+    grid = sbn.relplot(x=all_accs, y=all_ecs, size=downs, **args)
+    ax: Axes = grid.fig.axes[0]
+    ax.plot(*aacc_aec.line(), color="red", lw=LW)
+    ax.set_title("Paired Accuracy vs. EC")
+    ax.set_xlabel("Paired Mean Accuracy")
+    ax.set_ylabel("Error consistency")
+    grid.fig.text(x=0.7, y=0.85, s=f"r={aacc_aec.r:0.2f}, p={aacc_aec.p:0.2e}")
+    grid.fig.tight_layout()
+    grid.fig.subplots_adjust(right=0.85)
+    plt.show(block=False)
+
+    plt.show(block=True)
 
 
 if __name__ == "__main__":
     dataset = Dataset.Diabetes
     kind = ClassifierKind.GBT
-    reps = load_preds(dataset=dataset, kind=kind)
-    print(reps[0])
+    summarize_results(dataset=dataset, kind=kind, downsample=True)
