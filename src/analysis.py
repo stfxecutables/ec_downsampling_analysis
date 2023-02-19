@@ -45,7 +45,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from typing_extensions import Literal
 
-from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, ensure_dir
+from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, PLOTS, ensure_dir
 from src.enumerables import ClassifierKind, Dataset, Metric
 from src.hparams.gbt import XGBoostHparams
 from src.hparams.hparams import Hparams
@@ -63,6 +63,7 @@ from src.utils import (
     tuning_outdir,
 )
 
+OUT = ensure_dir(PLOTS / "downsampling")
 MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
 
 
@@ -148,14 +149,24 @@ def load_preds(
     outdir = pred_root(dataset=dataset, kind=kind, downsample=True)
     rep_dirs = sorted(outdir.glob("rep*"))
     reps: List[Repeat] = []
-    for rep_dir in tqdm(rep_dirs, desc="Loading predictions"):
+    for rep_dir in tqdm(
+        rep_dirs, desc=f"Loading predictions (data={dataset.name}, cls={kind.name})"
+    ):
         run_dirs = sorted(rep_dir.glob("run*"))
         runs: Dict[int, Run] = {}
         for r, run_dir in enumerate(run_dirs):
             fold_pqs = sorted(run_dir.glob("*.parquet"))
-            df = pd.concat(
-                [pd.read_parquet(fold) for fold in fold_pqs], axis=0, ignore_index=True
-            )
+            dfs = []
+            for fold in fold_pqs:
+                try:
+                    df = pd.read_parquet(fold)
+                    dfs.append(df)
+                except TypeError as e:
+                    raise RuntimeError(
+                        f"Likely corrupt data at {fold}. Details above."
+                    ) from e
+
+            df = pd.concat(dfs, axis=0, ignore_index=True)
             down = float(fold_pqs[0].stem.split("_")[1]) if downsample else 1.0
             runs[r] = Run(df=df, down=down)
         rep_id = int(rep_dir.name.replace("rep", ""))
@@ -166,7 +177,9 @@ def load_preds(
 @MEMOIZER.cache
 def get_rep_dfs(reps: List[Repeat]) -> Tuple[DataFrame, DataFrame]:
     df_pairs, df_runs = [], []
-    for rep in tqdm(reps, desc="Summarizing predictions"):
+    for rep in tqdm(
+        reps, desc=f"Summarizing predictions (data={dataset.name}, cls={kind.name})"
+    ):
         pairwise, runwise = rep.stats()
         df_pair = pairwise.copy()
         df_pair["rep"] = rep.id
@@ -184,7 +197,7 @@ def get_rep_dfs(reps: List[Repeat]) -> Tuple[DataFrame, DataFrame]:
 
 def summarize_results(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True
-) -> Tuple[DataFrame, DataFrame]:
+) -> None:
     LW = 1.0
     reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
     df_pair, df_run = get_rep_dfs(reps)
@@ -201,42 +214,49 @@ def summarize_results(
 
     grid: FacetGrid
     ax: Axes
+    fig: Figure
     args = dict(height=3.5, aspect=1.5, color="black")
+    subtitle = f"\n{dataset.name} - {kind.name}"
+    outdir = ensure_dir(OUT / f"{dataset.value}/{kind.value}")
 
     grid = sbn.relplot(data=means, x="Accuracy", y="EC", size="Downsample (%)", **args)
-    grid.fig.text(x=0.7, y=0.85, s=f"r={acc_ec.r:0.2f}, p={acc_ec.p:0.2e}")
-    ax = grid.fig.axes[0]
+    fig, ax = grid.fig, grid.fig.axes[0]
     ax.plot(*acc_ec.line(), color="red", lw=LW)
-    ax.set_title("Mean Pairwise Acc Means vs. Run Mean EC")
+    ax.set_title(f"Mean Pairwise Acc Means vs. Run Mean EC{subtitle}")
     ax.set_xlabel("Run Mean Pairwise Mean Accuracy")
     ax.set_ylabel("Run Mean EC")
-    grid.fig.tight_layout()
-    grid.fig.subplots_adjust(right=0.85)
+    fig.text(x=0.7, y=0.85, s=f"r={acc_ec.r:0.2f}, p={acc_ec.p:0.2e}")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    fig.savefig(str(outdir / "mean_pairwise_accs_vs_mean_ec.png"), dpi=600)
+    plt.close()
 
     # No effect of sample size on EC
     grid = sbn.relplot(data=means, x="Downsample (%)", y="EC", size="Accuracy", **args)
-    ax = grid.fig.axes[0]
+    fig, ax = grid.fig, grid.fig.axes[0]
     ax.plot(*down_ec.line(), color="red", lw=LW)
-    ax.set_title("Mean Pairwise Accuracy Means vs. Run Mean EC")
+    ax.set_title(f"Mean Pairwise Accuracy Means vs. Run Mean EC{subtitle}")
     ax.set_xlabel("Downsampling proportion")
     ax.set_ylabel("Run Mean EC")
-    grid.fig.text(x=0.7, y=0.85, s=f"r={down_ec.r:0.2f}, p={down_ec.p:0.2e}")
-    grid.fig.tight_layout()
-    grid.fig.subplots_adjust(right=0.85)
+    fig.text(x=0.7, y=0.85, s=f"r={down_ec.r:0.2f}, p={down_ec.p:0.2e}")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    fig.savefig(str(outdir / "downsample_vs_mean_ec_by_mean_pairwise_accs.png"), dpi=600)
+    plt.close()
 
     # effect of sample size on acc
     grid = sbn.relplot(data=means, x="Downsample (%)", y="Accuracy", size="EC", **args)
-    ax = grid.fig.axes[0]
+    fig, ax = grid.fig, grid.fig.axes[0]
     ax.set_title("Effect of Downsampling on Accuracy")
     ax.plot(*down_acc.line(), color="red", lw=LW)
-    ax.set_title("Mean Pairwise Accuracy Means vs. Run Mean EC")
+    ax.set_title(f"Mean Pairwise Accuracy Means vs. Run Mean EC{subtitle}")
     ax.set_xlabel("Downsampling proportion")
     ax.set_ylabel("Run Mean Pairwise Mean Accuracy")
-    grid.fig.text(x=0.7, y=0.85, s=f"r={down_acc.r:0.2f}, p={down_acc.p:0.2e}")
-    grid.fig.tight_layout()
-    grid.fig.subplots_adjust(right=0.85)
-
-    plt.show(block=False)
+    fig.text(x=0.7, y=0.85, s=f"r={down_acc.r:0.2f}, p={down_acc.p:0.2e}")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    fig.savefig(str(outdir / "downsample_vs_mean_pairwise_accs_by_mean_ec.png"), dpi=600)
+    plt.close()
 
     mean_accs = df_run.groupby("rep").mean()["Accuracy"]
     downs = df_run.groupby("rep").mean()["Downsample (%)"]
@@ -244,15 +264,16 @@ def summarize_results(
     mean_ecs = df_pair.groupby("rep").mean()["EC"]
     macc_mec = LinResult(x=mean_accs, y=mean_ecs)
     grid = sbn.relplot(x=mean_accs, y=mean_ecs, size=downs, **args)
-    ax: Axes = grid.fig.axes[0]
+    fig, ax = grid.fig, grid.fig.axes[0]
     ax.plot(*macc_mec.line(), color="red", lw=LW)
-    ax.set_title("Mean Accuracy vs. Mean EC")
+    ax.set_title(f"Mean Accuracy vs. Mean EC{subtitle}")
     ax.set_xlabel("Run Mean Accuracy")
     ax.set_ylabel("Run Mean Error consistency")
-    grid.fig.text(x=0.7, y=0.85, s=f"r={macc_mec.r:0.2f}, p={macc_mec.p:0.2e}")
-    grid.fig.tight_layout()
-    grid.fig.subplots_adjust(right=0.85)
-    plt.show(block=False)
+    fig.text(x=0.7, y=0.85, s=f"r={macc_mec.r:0.2f}, p={macc_mec.p:0.2e}")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    fig.savefig(str(outdir / "run_mean_acc_vs_run_mean_ec.png"), dpi=600)
+    plt.close()
 
     all_accs = df_pair["Accuracy"]
     all_ecs = df_pair["EC"]
@@ -260,20 +281,25 @@ def summarize_results(
     downs.name = "Downsample (%)"
     aacc_aec = LinResult(x=all_accs, y=all_ecs)
     grid = sbn.relplot(x=all_accs, y=all_ecs, size=downs, **args)
-    ax: Axes = grid.fig.axes[0]
+    fig, ax = grid.fig, grid.fig.axes[0]
     ax.plot(*aacc_aec.line(), color="red", lw=LW)
-    ax.set_title("Paired Accuracy vs. EC")
+    ax.set_title(f"Paired Accuracy vs. EC{subtitle}")
     ax.set_xlabel("Paired Mean Accuracy")
     ax.set_ylabel("Error consistency")
-    grid.fig.text(x=0.7, y=0.85, s=f"r={aacc_aec.r:0.2f}, p={aacc_aec.p:0.2e}")
-    grid.fig.tight_layout()
-    grid.fig.subplots_adjust(right=0.85)
-    plt.show(block=False)
-
-    plt.show(block=True)
+    fig.text(x=0.7, y=0.85, s=f"r={aacc_aec.r:0.2f}, p={aacc_aec.p:0.2e}")
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    fig.savefig(str(outdir / "pairwise_accs_vs_ecs.png"), dpi=600)
+    plt.close()
 
 
 if __name__ == "__main__":
-    dataset = Dataset.Diabetes
-    kind = ClassifierKind.GBT
-    summarize_results(dataset=dataset, kind=kind, downsample=True)
+    for dataset in [
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+    ]:
+        for kind in ClassifierKind:
+            summarize_results(dataset=dataset, kind=kind, downsample=True)
