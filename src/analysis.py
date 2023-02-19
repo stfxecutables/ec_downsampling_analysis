@@ -7,25 +7,10 @@ ROOT = Path(__file__).resolve().parent.parent  # isort: skip
 sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
-import os
 import sys
-import traceback
-from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-    cast,
-    no_type_check,
-)
+from typing import Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,33 +20,16 @@ from joblib import Memory
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
-from numpy.random import Generator
 from numpy.typing import ArrayLike
-from pandas import DataFrame, Series
-from scipy.stats import linregress, pearsonr
+from pandas import DataFrame
+from scipy.stats import linregress
 from seaborn import FacetGrid
-from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
-from typing_extensions import Literal
 
-from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, PLOTS, TABLES, ensure_dir
-from src.enumerables import ClassifierKind, Dataset, Metric
-from src.hparams.gbt import XGBoostHparams
-from src.hparams.hparams import Hparams
-from src.hparams.logistic import SGDLRHparams
-from src.hparams.nystroem import NystroemHparams
-from src.hparams.rf import XGBRFHparams
+from src.constants import PLOTS, TABLES, ensure_dir
+from src.enumerables import ClassifierKind, Dataset
 from src.metrics import acc_pairs, accs, ecs
 from src.prediction import pred_root
-from src.utils import (
-    get_classifier,
-    get_rand_hparams,
-    is_tuned,
-    load_tuning_params,
-    save_tuning_params,
-    tuning_outdir,
-)
 
 OUT = ensure_dir(PLOTS / "downsampling")
 MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
@@ -332,6 +300,7 @@ def corr_stats(grp: DataFrame) -> DataFrame:
     res = LinResult(x=acc, y=ec)
     return DataFrame({"r": res.r, "p": res.p}, index=[0])
 
+
 def corr_ec_down(grp: DataFrame) -> DataFrame:
     down = grp["Downsample (%)"]
     ec = grp["EC"]
@@ -381,7 +350,8 @@ def print_tabular_info() -> None:
     pair_down_corrs = (
         df_pair.drop(columns=["Accuracy", "rep"])
         .groupby(["data", "classifier"])
-        .apply(corr_ec_down).droplevel(2)
+        .apply(corr_ec_down)
+        .droplevel(2)
     )
     print(
         pair_down_corrs.reset_index().to_markdown(
@@ -390,10 +360,7 @@ def print_tabular_info() -> None:
     )
 
     df = pd.concat([ec_means, downs], axis=1).droplevel(2)
-    mean_down_corrs = (
-        df.groupby(["data", "classifier"]).apply(corr_ec_down).droplevel(2)
-
-    )
+    mean_down_corrs = df.groupby(["data", "classifier"]).apply(corr_ec_down).droplevel(2)
     print(
         mean_down_corrs.reset_index().to_markdown(
             index=False, floatfmt=["", "", "0.3f", "0.3f"]
