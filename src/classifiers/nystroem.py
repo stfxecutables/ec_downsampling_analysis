@@ -50,3 +50,7 @@ class NystroemSVM(Classifier):
         Xt = self.kernel_approximator.fit_transform(X=X.to_numpy())
         y_pred = self.classifier.predict(Xt)
         return metric.compute(y_true=y.to_numpy(), y_pred=y_pred)
+
+    def predict(self, X: DataFrame) -> ndarray:
+        Xt = self.kernel_approximator.fit_transform(X=X.to_numpy())
+        return super().predict(Xt)

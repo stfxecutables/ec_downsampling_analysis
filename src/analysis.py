@@ -385,13 +385,15 @@ def print_data_tables() -> None:
 
 if __name__ == "__main__":
     DATASETS = [
-        Dataset.Diabetes,
-        Dataset.Parkinsons,
-        Dataset.SPECT,
-        Dataset.Transfusion,
-        Dataset.HeartFailure,
+        # Dataset.Diabetes,
+        # Dataset.Parkinsons,
+        # Dataset.SPECT,
+        # Dataset.Transfusion,
+        # Dataset.HeartFailure,
+        Dataset.MimicIV,
     ]
-    print_data_tables()
+    # print_data_tables()
+    make_table(force=True)
     # print_tabular_info()
     # for dataset in DATASETS:
     #     for kind in ClassifierKind:
