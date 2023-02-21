@@ -12,7 +12,7 @@
 #SBATCH --mail-type=FAIL
 
 PROJECT=$SCRATCH/ec_downsampling_analysis
-CODE=$PROJECT/scripts/downsample_slow_uti.py
+CODE=$PROJECT/scripts/downsample_slow_uti_svm.py
 
 source "$PROJECT/.venv/bin/activate"
 python "$CODE"
