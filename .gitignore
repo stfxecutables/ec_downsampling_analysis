@@ -13,9 +13,13 @@ data/*preprocessed.json
 
 sync_code_niagara.sh
 
-**/*.out
+written/methods/*.rdf
+written/methods/*.html
 
 **/__*
+**/*.out
+**/*.pdf
+**/*.zip
 
 
 ################################################################################
