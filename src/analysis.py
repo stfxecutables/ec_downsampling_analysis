@@ -314,13 +314,14 @@ def print_tabular_info() -> None:
         df_pair.drop(columns=["Downsample (%)", "rep"])
         .groupby(["data", "classifier"])
         .apply(corr_stats)
+        .droplevel(2)
+        .reset_index()
     )
 
-    print(
-        pair_corrs.droplevel(2)
-        .reset_index()
-        .to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"])
-    )
+    print(pair_corrs.to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"]))
+    out = TABLES / "pairwise_correlations.csv"
+    pair_corrs.to_csv(out)
+    print(f"Saved pairwise correlations table to {out}")
 
     acc_means = (
         df_run.drop(columns="Downsample (%)")
@@ -339,62 +340,73 @@ def print_tabular_info() -> None:
     )
     means = pd.concat([acc_means, ec_means], axis=1)
     mean_corrs = (
-        means.droplevel(2).groupby(["data", "classifier"]).apply(corr_stats).droplevel(2)
+        means.droplevel(2)
+        .groupby(["data", "classifier"])
+        .apply(corr_stats)
+        .droplevel(2)
+        .reset_index()
     )
-    print(
-        mean_corrs.reset_index().to_markdown(
-            index=False, floatfmt=["", "", "0.3f", "0.3f"]
-        )
-    )
+    print(mean_corrs.to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"]))
+    out = TABLES / "mean_correlations.csv"
+    mean_corrs.to_csv(out)
+    print(f"Saved mean correlations table to {out}")
 
     pair_down_corrs = (
         df_pair.drop(columns=["Accuracy", "rep"])
         .groupby(["data", "classifier"])
         .apply(corr_ec_down)
         .droplevel(2)
+        .reset_index()
     )
-    print(
-        pair_down_corrs.reset_index().to_markdown(
-            index=False, floatfmt=["", "", "0.3f", "0.3f"]
-        )
-    )
+    print(pair_down_corrs.to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"]))
+    out = TABLES / "pairwise_downsample_correlations.csv"
+    pair_down_corrs.to_csv(out)
+    print(f"Saved pairwise downsampling correlations table to {out}")
 
     df = pd.concat([ec_means, downs], axis=1).droplevel(2)
-    mean_down_corrs = df.groupby(["data", "classifier"]).apply(corr_ec_down).droplevel(2)
-    print(
-        mean_down_corrs.reset_index().to_markdown(
-            index=False, floatfmt=["", "", "0.3f", "0.3f"]
-        )
+    mean_down_corrs = (
+        df.groupby(["data", "classifier"]).apply(corr_ec_down).droplevel(2).reset_index()
     )
+    print(mean_down_corrs.to_markdown(index=False, floatfmt=["", "", "0.3f", "0.3f"]))
+    out = TABLES / "mean_downsample_correlations.csv"
+    mean_down_corrs.to_csv(out)
+    print(f"Saved mean downsampling correlations table to {out}")
+
 
 def print_data_tables() -> None:
     dfs = []
     for dataset in tqdm(Dataset, total=len(Dataset), desc="Collecting dataset stats"):
         X, y = dataset.load()
         unq, cnts = np.unique(y, return_counts=True)
-        dfs.append(DataFrame({
-            "name": dataset.name,
-            "n_samples": len(y),
-            "n_features": X.shape[1],
-            "n_class": len(unq),
-            "majority": np.round(np.max(cnts) / len(y), 2),
-        }, index=[0]))
+        dfs.append(
+            DataFrame(
+                {
+                    "name": dataset.name,
+                    "n_samples": len(y),
+                    "n_features": X.shape[1],
+                    "n_class": len(unq),
+                    "majority": np.round(np.max(cnts) / len(y), 2),
+                },
+                index=[0],
+            )
+        )
     df = pd.concat(dfs, axis=0, ignore_index=True)
     print(df.to_markdown(index=False))
 
 
 if __name__ == "__main__":
     DATASETS = [
-        # Dataset.Diabetes,
-        # Dataset.Parkinsons,
-        # Dataset.SPECT,
-        # Dataset.Transfusion,
-        # Dataset.HeartFailure,
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
         Dataset.MimicIV,
+        Dataset.UTIResistance,
     ]
     # print_data_tables()
-    make_table(force=True)
-    # print_tabular_info()
+    # make_table(force=False)
+    print_tabular_info()
     # for dataset in DATASETS:
     #     for kind in ClassifierKind:
     #         summarize_results(dataset=dataset, kind=kind, downsample=True)
