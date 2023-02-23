@@ -43,7 +43,7 @@ if __name__ == "__main__":
         dataset=args.dataset,
         metric=Metric.Accuracy,
         n_runs=250,
-        max_workers=20
+        tqdm_max_workers=20
         if args.dataset is Dataset.MimicIV
         else MAX_WORKERS[args.dataset][args.kind],
         force=False,

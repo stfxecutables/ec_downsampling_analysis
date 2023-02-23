@@ -44,6 +44,7 @@ from src.hparams.hparams import Hparams
 from src.hparams.logistic import SGDLRHparams
 from src.hparams.nystroem import NystroemHparams
 from src.hparams.rf import XGBRFHparams
+from src.hparams.svm import SVMHparams
 from src.utils import (
     get_classifier,
     get_rand_hparams,
@@ -98,11 +99,20 @@ def load_run_fold_params(
     dataset: Dataset, kind: ClassifierKind, run: int, fold: int
 ) -> Hparams:
     root = get_hp_dir(dataset=dataset, kind=kind, run=run, fold=fold)
+    if dataset in [
+        Dataset.SPECT,
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.Transfusion,
+    ]:
+        SVMParams = SVMHparams
+    else:
+        SVMParams = NystroemHparams
     kinds: Dict[ClassifierKind, Type[Hparams]] = {
         ClassifierKind.GBT: XGBoostHparams,
         ClassifierKind.LR: SGDLRHparams,
         ClassifierKind.RF: XGBRFHparams,
-        ClassifierKind.SVM: NystroemHparams,
+        ClassifierKind.SVM: SVMParams,
     }
     hp = kinds[kind]
     return hp.from_json(root)
@@ -122,7 +132,7 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
             score = float(pd.read_json(scorefile, typ="series").to_numpy().item())
             return ParallelResult(hparams=hps, fold=fold, run=run, score=score)
 
-        cls = get_classifier(args.kind)
+        cls = get_classifier(args.kind, dataset=dataset)
         classifier = cls(args.hparams)
         rng = args.rng
         X, y = args.dataset.load()
@@ -148,18 +158,66 @@ def evaluate(args: ParallelArgs) -> Optional[ParallelResult]:
         return None
 
 
+def get_xgb_tqdm_workers(
+    classifier: ClassifierKind,
+    dataset: Dataset,
+) -> Tuple[int, int]:
+    """
+    Returns
+    -------
+    xgb_n_jobs: int
+    tqdm_max_workers: int
+    """
+    n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
+    fasts = [Dataset.Diabetes, Dataset.Parkinsons, Dataset.SPECT, Dataset.Transfusion]
+    if dataset in fasts:  # classifier irrelevant
+        xgb_workers = 1
+        tqdm_max_workers = n_cpu
+        return xgb_workers, tqdm_max_workers
+
+    tqdm_max_workers = {
+        # Mid
+        Dataset.HeartFailure: {
+            ClassifierKind.SVM: 20,
+            ClassifierKind.LR: 20,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
+        Dataset.Diabetes130: {
+            ClassifierKind.SVM: 20,
+            ClassifierKind.LR: 20,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
+        # Slow + Memory
+        Dataset.UTIResistance: {
+            ClassifierKind.SVM: 8,
+            ClassifierKind.LR: 8,
+            ClassifierKind.GBT: 30,
+            ClassifierKind.RF: 30,
+        },
+        Dataset.MimicIV: {
+            ClassifierKind.SVM: 8,
+            ClassifierKind.LR: 8,
+            ClassifierKind.GBT: 20,
+            ClassifierKind.RF: 20,
+        },
+    }[dataset][classifier]
+    xgb_workers = n_cpu // tqdm_max_workers
+    return xgb_workers, tqdm_max_workers
+
+
 def random_tune(
     classifier: ClassifierKind,
     dataset: Dataset,
     metric: Metric = Metric.Accuracy,
     n_runs: int = 100,
-    max_workers: int = 1,
     force: bool = False,
 ) -> None:
     if not force and is_tuned(dataset=dataset, kind=classifier):
         return
     K = 5
-    xgb_jobs = 4 if dataset is Dataset.MimicIV else 8
+    xgb_jobs, tqdm_workers = get_xgb_tqdm_workers(classifier=classifier, dataset=dataset)
     run_seeds = np.random.SeedSequence().spawn(n_runs)
     run_rngs = [np.random.default_rng(seed) for seed in run_seeds]
     fold_rngs: List[List[Generator]] = []
@@ -169,16 +227,9 @@ def random_tune(
     pargs = []
     tqdm_args = dict(chunksize=1)
     for run in range(n_runs):
-        hps = get_rand_hparams(kind=classifier, rng=run_rngs[run])  # type: ignore
-        n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
-        if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
-            n_workers = n_cpu // xgb_jobs
-            hps.set_n_jobs(xgb_jobs)
-            tqdm_args["max_workers"] = n_workers
-        else:
-            tqdm_args["max_workers"] = max_workers
-            n_jobs = n_cpu // max_workers
-            hps.set_n_jobs(n_jobs)
+        hps = get_rand_hparams(kind=classifier, rng=run_rngs[run], data=dataset)  # type: ignore
+        hps.set_n_jobs(xgb_jobs)
+        tqdm_args["max_workers"] = tqdm_workers
 
         for fold in range(K):
             pargs.append(
@@ -241,7 +292,7 @@ if __name__ == "__main__":
                 dataset=dataset,
                 metric=Metric.Accuracy,
                 n_runs=250,
-                max_workers=20
+                tqdm_max_workers=20
                 if dataset is Dataset.MimicIV
                 else MAX_WORKERS[dataset][kind],
                 force=False,

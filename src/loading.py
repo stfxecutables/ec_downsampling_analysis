@@ -44,7 +44,7 @@ from sklearn.kernel_approximation import RBFSampler as FourierApproximator
 from sklearn.linear_model import LogisticRegression as LR
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import StratifiedShuffleSplit as SSSplit
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
 from sklearn.svm import SVC, LinearSVC
 from tqdm import tqdm
 from typing_extensions import Literal
@@ -64,6 +64,11 @@ def load_df(path: Path, target: str) -> Tuple[DataFrame, Series]:
 def standardize(x: DataFrame) -> DataFrame:
     return DataFrame(
         data=StandardScaler().fit_transform(x), columns=x.columns, index=x.index
+    )
+
+def normalize(x: DataFrame) -> DataFrame:
+    return DataFrame(
+        data=MinMaxScaler().fit_transform(x), columns=x.columns, index=x.index
     )
 
 

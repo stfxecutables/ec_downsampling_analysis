@@ -17,6 +17,7 @@ from src.classifiers.gbt import XGBoostClassifier
 from src.classifiers.logistic import LogisticRegression
 from src.classifiers.nystroem import NystroemSVM
 from src.classifiers.rf import XGBoostRFClassifier
+from src.classifiers.svm import ClassicSVM
 from src.constants import HP_OUTDIR
 from src.enumerables import ClassifierKind, Dataset
 from src.hparams.gbt import XGBoostHparams
@@ -24,14 +25,28 @@ from src.hparams.hparams import Hparams
 from src.hparams.logistic import SGDLRHparams
 from src.hparams.nystroem import NystroemHparams
 from src.hparams.rf import XGBRFHparams
+from src.hparams.svm import SVMHparams
 
 
-def get_classifier(kind: ClassifierKind) -> Type[Classifier]:
+def get_classifier(
+    kind: ClassifierKind, dataset: Optional[Dataset] = None
+) -> Type[Classifier]:
+    SVMClassifier: Union[Type[ClassicSVM], Type[NystroemSVM]]
+    if dataset in [
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+    ]:
+        SVMClassifier = ClassicSVM
+    else:
+        SVMClassifier = NystroemSVM
     kinds: Dict[ClassifierKind, Type[Classifier]] = {
         ClassifierKind.GBT: XGBoostClassifier,
         ClassifierKind.LR: LogisticRegression,
         ClassifierKind.RF: XGBoostRFClassifier,
-        ClassifierKind.SVM: NystroemSVM,
+        ClassifierKind.SVM: SVMClassifier,
     }
     return kinds[kind]
 
@@ -64,12 +79,24 @@ def get_rand_hparams(
     ...
 
 
-def get_rand_hparams(kind: ClassifierKind, rng: Optional[Generator]) -> Hparams:
+def get_rand_hparams(
+    kind: ClassifierKind, rng: Optional[Generator], data: Optional[Dataset] = None
+) -> Hparams:
+    if data in [
+        Dataset.SPECT,
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+    ]:
+        SVMParams = SVMHparams
+    else:
+        SVMParams = NystroemHparams
     kinds: Dict[ClassifierKind, Hparams] = {
         ClassifierKind.GBT: XGBoostHparams(),
         ClassifierKind.LR: SGDLRHparams(),
         ClassifierKind.RF: XGBRFHparams(),
-        ClassifierKind.SVM: NystroemHparams(),
+        ClassifierKind.SVM: SVMParams(),
     }
     hps = kinds[kind]
     return hps.random(rng)
@@ -86,11 +113,21 @@ def is_tuned(dataset: Dataset, kind: ClassifierKind) -> bool:
 
 def load_tuning_params(dataset: Dataset, kind: ClassifierKind) -> Hparams:
     root = tuning_outdir(dataset=dataset, kind=kind)
+    if dataset in [
+        Dataset.SPECT,
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+    ]:
+        SVMParams = SVMHparams
+    else:
+        SVMParams = NystroemHparams
     kinds: Dict[ClassifierKind, Type[Hparams]] = {
         ClassifierKind.GBT: XGBoostHparams,
         ClassifierKind.LR: SGDLRHparams,
         ClassifierKind.RF: XGBRFHparams,
-        ClassifierKind.SVM: NystroemHparams,
+        ClassifierKind.SVM: SVMParams,
     }
     hp = kinds[kind]
     return hp.from_json(root)

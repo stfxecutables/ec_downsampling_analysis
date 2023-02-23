@@ -80,6 +80,15 @@ class Dataset(Enum):
         ]
 
     @staticmethod
+    def very_fast() -> List[Dataset]:
+        return [
+            Dataset.Diabetes,
+            Dataset.Transfusion,
+            Dataset.Parkinsons,
+            Dataset.SPECT,
+        ]
+
+    @staticmethod
     def slow() -> List[Dataset]:
         return [
             Dataset.MimicIV,

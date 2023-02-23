@@ -10,7 +10,7 @@ sys.path.append(str(ROOT))  # isort: skip
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,9 +21,12 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy import ndarray
 from numpy.typing import ArrayLike
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from scipy.stats import linregress
 from seaborn import FacetGrid
+from statsmodels.api import OLS
+from statsmodels.nonparametric.smoothers_lowess import lowess
+from statsmodels.regression.rolling import RollingOLS
 from tqdm import tqdm
 
 from src.constants import PLOTS, TABLES, ensure_dir
@@ -32,7 +35,10 @@ from src.metrics import acc_pairs, accs, ecs
 from src.prediction import pred_root
 
 OUT = ensure_dir(PLOTS / "downsampling")
+MONTAGES = ensure_dir(OUT / "montage")
+INDIVIDUALS = ensure_dir(OUT / "individual")
 MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
+CLASSIFIER_ORDER = ["LR", "SVM", "RF", "GBT"]
 
 
 @dataclass
@@ -58,7 +64,7 @@ class Run:
     down: float
 
 
-@MEMOIZER.cache
+# @MEMOIZER.cache
 def full_df(runs: Dict[int, Run]) -> DataFrame:
     y_true = runs[0].df["y_true"]
     preds = []
@@ -91,6 +97,11 @@ class Repeat:
             Columns are "acc" (each run accuracy).
 
         """
+        for i in range(len(self.runs) - 1):
+            assert np.array_equal(
+                self.runs[i].df["y_true"], self.runs[i + 1].df["y_true"]
+            ), "Repeat runs do not have identical test sets"
+
         df = self.full_df()
         y = df["y_true"].copy()
         preds = df.filter(regex="pred")
@@ -110,7 +121,7 @@ class Repeat:
 DfPlus = Dict[str, Union[DataFrame, float]]
 
 
-@MEMOIZER.cache
+# @MEMOIZER.cache
 def load_preds(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True
 ) -> List[Repeat]:
@@ -134,7 +145,10 @@ def load_preds(
                         f"Likely corrupt data at {fold}. Details above."
                     ) from e
 
-            df = pd.concat(dfs, axis=0, ignore_index=True)
+            df = pd.concat(dfs, axis=0, ignore_index=False).sort_index()
+            uq, counts = np.unique(df.index, return_counts=True)
+            if not np.all(counts == 1):
+                raise ValueError("Duplicate test indices/samples in folds...")
             down = float(fold_pqs[0].stem.split("_")[1]) if downsample else 1.0
             runs[r] = Run(df=df, down=down)
         rep_id = int(rep_dir.name.replace("rep", ""))
@@ -142,7 +156,7 @@ def load_preds(
     return reps
 
 
-@MEMOIZER.cache
+# @MEMOIZER.cache
 def get_rep_dfs(reps: List[Repeat]) -> Tuple[DataFrame, DataFrame]:
     df_pairs, df_runs = [], []
     for rep in tqdm(reps, desc="Summarizing predictions"):
@@ -260,17 +274,53 @@ def summarize_results(
 
 
 def make_table(
-    downsample: bool = True, force: bool = False
+    dataset: Dataset, kind: ClassifierKind, downsample: bool = True, force: bool = False
+) -> Tuple[DataFrame, DataFrame]:
+    pairs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_pairs.json"
+    runs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_runs.json"
+    if pairs_out.exists() and runs_out.exists() and not force:
+        df_pair = pd.read_json(pairs_out)
+        df_run = pd.read_json(runs_out)
+        if "index" in df_pair.columns:
+            df_pair.drop(columns="index", inplace=True)
+        if "index" in df_run.columns:
+            df_run.drop(columns="index", inplace=True)
+        return df_pair, df_run
+
+    reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
+    df_pair, df_run = get_rep_dfs(reps)
+    df_pair["down"] *= 100
+    df_run["down"] *= 100
+    renames = {"acc": "Accuracy", "ec": "EC", "down": "Downsample (%)"}
+    df_pair.rename(columns=renames, inplace=True)
+    df_run.rename(columns=renames, inplace=True)
+    df_pair["data"] = dataset.name
+    df_run["data"] = dataset.name
+    df_pair["classifier"] = kind.name
+    df_run["classifier"] = kind.name
+    df_pair.to_json(pairs_out)
+    print(f"Saved pairs data to {pairs_out}")
+    df_run.to_json(runs_out)
+    print(f"Saved runs data to {runs_out}")
+    return df_pair, df_run
+
+
+def make_tables_legacy(
+    datasets: List[Dataset], downsample: bool = True, force: bool = False
 ) -> Tuple[DataFrame, DataFrame]:
     pairs_out = TABLES / "all_pairs.json"
     runs_out = TABLES / "all_runs.json"
     if pairs_out.exists() and runs_out.exists() and not force:
         df_pair = pd.read_json(pairs_out)
         df_run = pd.read_json(runs_out)
+        if "index" in df_pair.columns:
+            df_pair.drop(columns="index", inplace=True)
+        if "index" in df_run.columns:
+            df_run.drop(columns="index", inplace=True)
         return df_pair, df_run
 
     df_pairs, df_runs = [], []
-    for dataset in DATASETS:
+    for dataset in datasets:
         for kind in ClassifierKind:
             reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
             df_pair, df_run = get_rep_dfs(reps)
@@ -294,6 +344,25 @@ def make_table(
     return df_pair, df_run
 
 
+def make_tables(
+    datasets: List[Dataset],
+    kinds: List[ClassifierKind],
+    downsample: bool = True,
+    force: bool = False,
+) -> Tuple[DataFrame, DataFrame]:
+    df_pairs, df_runs = [], []
+    for dataset in datasets:
+        for kind in kinds:
+            df_pair, df_run = make_table(
+                dataset=dataset, kind=kind, downsample=downsample, force=force
+            )
+            df_pairs.append(df_pair)
+            df_runs.append(df_run)
+    df_pair = pd.concat(df_pairs, axis=0, ignore_index=True)
+    df_run = pd.concat(df_runs, axis=0, ignore_index=True)
+    return df_pair, df_run
+
+
 def corr_stats(grp: DataFrame) -> DataFrame:
     acc = grp["Accuracy"]
     ec = grp["EC"]
@@ -308,8 +377,8 @@ def corr_ec_down(grp: DataFrame) -> DataFrame:
     return DataFrame({"r": res.r, "p": res.p}, index=[0])
 
 
-def print_tabular_info() -> None:
-    df_pair, df_run = make_table()
+def print_tabular_info(datasets: List[Dataset]) -> None:
+    df_pair, df_run = make_tables(datasets=datasets, kinds=[*ClassifierKind])
     pair_corrs = (
         df_pair.drop(columns=["Downsample (%)", "rep"])
         .groupby(["data", "classifier"])
@@ -390,23 +459,203 @@ def print_data_tables() -> None:
                 index=[0],
             )
         )
-    df = pd.concat(dfs, axis=0, ignore_index=True)
+    df = pd.concat(dfs, axis=0, ignore_index=True).reset_index()
     print(df.to_markdown(index=False))
+
+
+def get_lowess_fits(df: DataFrame) -> DataFrame:
+    def fit_lowess(y: str) -> Callable[[DataFrame], DataFrame]:
+        def _closure(grp: DataFrame) -> DataFrame:
+            endog = grp[y]
+            exog = grp["Downsample (%)"]
+            fitted = np.ravel(lowess(endog=endog, exog=exog, return_sorted=False))
+            table = DataFrame({"lowess_ec" if y == "EC" else "lowess_acc": fitted})
+            # table["classifier"] = grp["classifier"]
+            return table
+
+        return _closure
+
+    if ("classifier" in df.columns) and len(np.unique(df.classifier)) != 1:
+        acc_lowess = (
+            df.groupby("classifier")
+            .apply(fit_lowess("Accuracy"))
+            .droplevel(1)
+            .reset_index()
+            .drop(columns="classifier")
+        )
+        ec_lowess = (
+            df.groupby("classifier")
+            .apply(fit_lowess("EC"))
+            .droplevel(1)
+            .reset_index()
+            .drop(columns="classifier")
+        )
+    else:
+        acc_lowess = fit_lowess("Accuracy")(df)
+        ec_lowess = fit_lowess("EC")(df)
+    return pd.concat([df, acc_lowess, ec_lowess], axis=1)
+
+
+def make_lowess_plot(df_sub: DataFrame, individual: bool = False) -> FacetGrid:
+    col_args = (
+        dict()
+        if individual
+        else dict(
+            col="classifier",
+            col_wrap=2,
+            col_order=CLASSIFIER_ORDER,
+        )
+    )
+    grid: FacetGrid = sbn.relplot(
+        data=df_sub,
+        height=3,
+        aspect=1.25,
+        x="Downsample (%)",
+        y="Accuracy",
+        color="black",
+        label="Accuracy",
+        s=5.0,
+        **col_args,
+    )
+    grid.map(sbn.lineplot, "Downsample (%)", "lowess_acc", color="black", label=None)
+    grid.map(sbn.lineplot, "Downsample (%)", "lowess_ec", color="red", label=None)
+    grid.map(
+        sbn.scatterplot,
+        "Downsample (%)",
+        "EC",
+        color="red",
+        label="EC",
+        s=5.0,
+    )
+    grid.add_legend()
+    sbn.move_legend(grid, loc="upper right")
+    grid.set_axis_labels(y_var="Mean EC or Accuracy", x_var="Downsampling Percent")
+    if individual:
+        classifier = df_sub.classifier.unique().item()
+        grid.set_titles(classifier)
+    else:
+        grid.set_titles("{col_name}")
+    grid.tight_layout()
+    return grid
+
+
+def make_montage_plots(datasets: List[Dataset]) -> None:
+    df_pairs, df_runs = make_tables(
+        datasets=datasets, kinds=[*ClassifierKind], force=False
+    )
+    ec_means = (
+        df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    acc_means = df_runs.groupby(["data", "classifier", "rep"]).mean()
+    df_means = pd.concat([acc_means, ec_means], axis=1).reset_index()
+
+    for data in datasets:
+        dsname = data.name
+        df = df_means.loc[df_means.data == dsname].reset_index()
+        dfl = get_lowess_fits(df)
+        sbn.set_style("darkgrid")
+        grid: FacetGrid = make_lowess_plot(dfl)
+
+        grid.fig.subplots_adjust(right=0.95)
+        grid.fig.suptitle(data.name)
+        grid.tight_layout()
+        out = MONTAGES / f"{data.value}.png"
+        grid.savefig(out, dpi=600)
+        print(f"Saved plot to {out}")
+        plt.close()
+
+
+def make_individual_plots(datasets: List[Dataset], kinds: List[ClassifierKind]) -> None:
+    df_pairs, df_runs = make_tables(datasets=datasets, kinds=kinds, force=False)
+    grouper = ["rep"]
+    if len(kinds) > 1:
+        grouper = ["classifier"] + grouper
+    if len(datasets) > 1:
+        grouper = ["data"] + grouper
+    ec_means = (
+        df_pairs.drop(columns=["Downsample (%)", "Accuracy"]).groupby(grouper).mean()
+    )
+    acc_means = df_runs.groupby(grouper).mean()
+    df_means = pd.concat([acc_means, ec_means], axis=1).reset_index()
+
+    for data in datasets:
+        for kind in kinds:
+            dsname = data.name
+            if len(datasets) > 1:
+                df = df_means.loc[df_means.data == dsname].reset_index()
+            else:
+                df = df_means.copy()
+            dfl = get_lowess_fits(df)
+            if len(kinds) > 1:
+                df_cls = dfl.loc[dfl.classifier == kind.name].reset_index()
+            else:
+                df_cls = dfl
+                df_cls["classifier"] = kind.name
+            grid = make_lowess_plot(df_cls, individual=True)
+
+            grid.fig.suptitle(data.name)
+            grid.tight_layout()
+            grid.fig.subplots_adjust(right=0.95)
+            out = INDIVIDUALS / f"{data.value}/{kind.name.lower()}.png"
+            ensure_dir(out.parent)
+            grid.savefig(out, dpi=600)
+            print(f"Saved plot to {out}")
+            plt.close()
+
+
+def diabetes_svm_plot_stats() -> None:
+    data = Dataset.Diabetes
+    dsname = data.name
+    kind = ClassifierKind.SVM
+    df_pairs, df_runs = make_table(dataset=data, kind=kind, force=True)
+    ec_means = (
+        df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    acc_means = df_runs.groupby(["data", "classifier", "rep"]).mean()
+    df_means = pd.concat([acc_means, ec_means], axis=1).reset_index().drop(columns="rep")
+    df = df_means.loc[df_means.data == dsname].reset_index().drop(columns="index")
+    dfl = get_lowess_fits(df)
+    df = dfl.loc[dfl.classifier == kind.name].reset_index()
+    grid = make_lowess_plot(df, individual=True)
+
+    # Correlation analysis
+    x, y = df["Downsample (%)"], df["EC"]
+    ols = OLS(endog=y, exog=x, missing="none")
+    res = ols.fit()
+    print(res.summary())
+    print(res.summary2())
+
+    grid.fig.suptitle(data.name)
+    grid.tight_layout()
+    grid.fig.subplots_adjust(right=0.95)
+    out = INDIVIDUALS / f"{dsname}_{kind.name.lower()}_regression_stats.png"
+    ensure_dir(out.parent)
+    grid.savefig(out, dpi=600)
+    print(f"Saved plot to {out}")
+    plt.show()
 
 
 if __name__ == "__main__":
     DATASETS = [
         Dataset.Diabetes,
-        Dataset.Parkinsons,
-        Dataset.SPECT,
-        Dataset.Transfusion,
-        Dataset.HeartFailure,
-        Dataset.MimicIV,
-        Dataset.UTIResistance,
+        # Dataset.Parkinsons,
+        # Dataset.SPECT,
+        # Dataset.Transfusion,
+        # Dataset.HeartFailure,
+        # Dataset.MimicIV,
+        # Dataset.UTIResistance,
     ]
+    make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
+    make_montage_plots(DATASETS)
+    # make_individual_plots(DATASETS, kinds=[*ClassifierKind])
+    # diabetes_svm_plot_stats()
     # print_data_tables()
     # make_table(force=False)
-    print_tabular_info()
+    # print_tabular_info(datasets=DATASETS)
     # for dataset in DATASETS:
     #     for kind in ClassifierKind:
     #         summarize_results(dataset=dataset, kind=kind, downsample=True)

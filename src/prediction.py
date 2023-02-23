@@ -12,14 +12,14 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from numpy.random import Generator
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from scipy.stats.qmc import Halton
-from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
+from sklearn.model_selection import KFold, StratifiedKFold, StratifiedShuffleSplit
 from tqdm.contrib.concurrent import process_map
 
 from src.constants import DOWNSAMPLE_OUTDIR, PLAIN_OUTDIR, ensure_dir
@@ -36,7 +36,8 @@ class ParallelArgs:
     rep: int
     downsample: Optional[float]
     split: int  # split seed
-    rng: Generator
+    fold_rng: Generator
+    shuffle_rng: Generator
 
 
 def pred_root(
@@ -88,7 +89,8 @@ def compute_preds(args: ParallelArgs) -> None:
         fold = args.fold
         down = args.downsample
         seed = args.split
-        rng = args.rng
+        rng = args.fold_rng
+        shuffle_rng = args.shuffle_rng
 
         out = pred_outfile(
             dataset=dataset, kind=kind, rep=rep, run=run, fold=fold, down=down
@@ -96,7 +98,7 @@ def compute_preds(args: ParallelArgs) -> None:
         if out.exists():
             return
 
-        cls = get_classifier(kind)
+        cls = get_classifier(kind, dataset=dataset)
         hps = load_tuning_params(dataset=dataset, kind=kind)
         classifier = cls(hps)
         X, y = args.dataset.load()
@@ -105,19 +107,94 @@ def compute_preds(args: ParallelArgs) -> None:
                 n_splits=1, train_size=down, random_state=seed
             )
             sub_idx = next(sub_splitter.split(y, y))[0]
-            X, y = X.iloc[sub_idx], y.iloc[sub_idx]
+            # we no longer care about original data or indices
+            X = X.iloc[sub_idx].reset_index()
+            y = Series(
+                y.iloc[sub_idx].reset_index().drop(columns="index").to_numpy().ravel()
+            )
+        idx_shuffle = shuffle_rng.permutation(len(y))
+        X, y = X.iloc[idx_shuffle], y.iloc[idx_shuffle]
         skf = StratifiedKFold(n_splits=5, shuffle=False)
+        # skf = KFold(n_splits=5, shuffle=False)
         idx_train, idx_test = list(skf.split(y, y))[args.fold]
+
         X_tr, y_tr = X.iloc[idx_train], y.iloc[idx_train]
         X_test, y_test = X.iloc[idx_test], y.iloc[idx_test]
         classifier.fit(X_tr, y_tr, rng=rng)
         y_pred = classifier.predict(X_test)
-        preds = DataFrame({"idx": idx_test, "y_pred": y_pred, "y_true": y_test})
+
+        # Ultimately we will concat along axis 0 all `preds` dfs like below to
+        # re-assemble the original test set. For this to work, we need the
+        # "y_true" and "y_pred" columns unshuffled. Thankfully, the Series
+        # index is actually useful for once and will make this work
+
+        # idx_unshuffle = np.ravel(np.argsort(y_test.index))
+        # y_pred = np.ravel(y_pred)[idx_unshuffle]
+        # y_test = np.ravel(y_test)[idx_unshuffle]
+        preds = DataFrame(
+            {"y_pred": y_pred, "y_true": y_test},
+            index=y_test.index,
+        )
         preds.to_parquet(out)
     except Exception as e:
         traceback.print_exc()
         print(f"Got error: {e}")
         return None
+
+
+def get_xgb_tqdm_workers(
+    classifier: ClassifierKind,
+    dataset: Dataset,
+) -> Tuple[int, int]:
+    """
+    Returns
+    -------
+    xgb_n_jobs: int
+    tqdm_max_workers: int
+    """
+    n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
+    fasts = [
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+    ]
+    if dataset in fasts:  # classifier irrelevant
+        xgb_workers = 1
+        tqdm_max_workers = n_cpu
+        return xgb_workers, tqdm_max_workers
+
+    tqdm_max_workers = {
+        # Mid
+        Dataset.HeartFailure: {
+            ClassifierKind.SVM: 20,
+            ClassifierKind.LR: 20,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
+        Dataset.Diabetes130: {
+            ClassifierKind.SVM: 20,
+            ClassifierKind.LR: 20,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
+        # Slow + Memory
+        Dataset.UTIResistance: {
+            ClassifierKind.SVM: 8,
+            ClassifierKind.LR: 8,
+            ClassifierKind.GBT: 30,
+            ClassifierKind.RF: 30,
+        },
+        Dataset.MimicIV: {
+            ClassifierKind.SVM: 8,
+            ClassifierKind.LR: 8,
+            ClassifierKind.GBT: 20,
+            ClassifierKind.RF: 20,
+        },
+    }[dataset][classifier]
+    xgb_workers = n_cpu // tqdm_max_workers
+    return xgb_workers, tqdm_max_workers
 
 
 def evaluate_downsampling(
@@ -141,7 +218,7 @@ def evaluate_downsampling(
     K = 5
     # below just plucked from a random run of SeedSequence().entropy
     entropy = 285216691326606742260051019197268485321
-    xgb_jobs = 4 if dataset is Dataset.MimicIV else 8
+    xgb_jobs, tqdm_workers = get_xgb_tqdm_workers(classifier=classifier, dataset=dataset)
     ss = np.random.SeedSequence(entropy=entropy)
     seeds = ss.spawn(n_reps * n_runs * K)
     base_rng = np.random.default_rng(ss)
@@ -157,13 +234,7 @@ def evaluate_downsampling(
     rngs = rngs.reshape(n_reps, n_runs, K)
 
     pargs = []
-    tqdm_args = dict(chunksize=1)
-    n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
-    if classifier in [ClassifierKind.GBT, ClassifierKind.RF]:
-        n_workers = n_cpu // xgb_jobs
-        tqdm_args["max_workers"] = n_workers
-    else:
-        tqdm_args["max_workers"] = max_workers
+    tqdm_args = dict(chunksize=1, max_workers=tqdm_workers)
 
     for rep in range(n_reps):
         if only_rep is not None:
@@ -179,8 +250,18 @@ def evaluate_downsampling(
                         fold=fold,
                         rep=rep,
                         run=run,
-                        rng=rngs[rep][run][fold],
-                        split=split_seeds[rep][run][fold],
+                        # We (perhaps) need each fold to get a different rng
+                        # for fitting, so rngs[rep][run][fold], below.
+                        fold_rng=rngs[rep][run][fold],
+                        # Within a *run* (i.e. 5 folds) shuffling needs to be
+                        # the same, (or we can't re-assemble the folds), so we
+                        # need the same rng for each fold, hence
+                        # rngs[rep][run][0].
+                        shuffle_rng=rngs[rep][run][0],
+                        # Within a *rep* (i.e. 10 runs) the same downsampling
+                        # set must be maintained, or the predictions across
+                        # runs cannot be compared for EC. So rngs[rep][0][0].
+                        split=split_seeds[rep][0][0],
                         downsample=float(percents[rep]) if downsample else None,
                     )
                 )
