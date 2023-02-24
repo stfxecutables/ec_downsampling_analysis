@@ -22,10 +22,12 @@ if __name__ == "__main__":
     grid = [
         Namespace(**args)
         for args in list(
-            # ParameterGrid({"dataset": [Dataset.HeartFailure], "kind": [*ClassifierKind]})
-            # ParameterGrid({"dataset": Dataset.very_fast(), "kind": [*ClassifierKind]})
-            # ParameterGrid({"dataset": [Dataset.Diabetes], "kind": [*ClassifierKind]})
-            ParameterGrid({"dataset": [Dataset.Diabetes], "kind": [ClassifierKind.SVM]})
+            ParameterGrid(
+                {
+                    "dataset": [Dataset.MimicIV],
+                    "kind": [ClassifierKind.SVM],
+                },
+            )
         )
     ]
     print(f"Total number of combinations: {len(grid)}")

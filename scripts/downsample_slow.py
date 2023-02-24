@@ -67,6 +67,5 @@ if __name__ == "__main__":
             downsample=True,
             n_reps=200,
             n_runs=10,
-            max_workers=MAX_WORKERS[args.dataset][args.kind],
             only_rep=args.only_rep,
         )

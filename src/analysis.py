@@ -605,11 +605,11 @@ def make_individual_plots(datasets: List[Dataset], kinds: List[ClassifierKind]) 
             plt.close()
 
 
-def diabetes_svm_plot_stats() -> None:
+def diabetes_svm_plot_stats(force: bool = False) -> None:
     data = Dataset.Diabetes
     dsname = data.name
     kind = ClassifierKind.SVM
-    df_pairs, df_runs = make_table(dataset=data, kind=kind, force=True)
+    df_pairs, df_runs = make_table(dataset=data, kind=kind, force=force)
     ec_means = (
         df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
         .groupby(["data", "classifier", "rep"])
@@ -620,7 +620,124 @@ def diabetes_svm_plot_stats() -> None:
     df = df_means.loc[df_means.data == dsname].reset_index().drop(columns="index")
     dfl = get_lowess_fits(df)
     df = dfl.loc[dfl.classifier == kind.name].reset_index()
-    grid = make_lowess_plot(df, individual=True)
+
+    fig, axes = plt.subplots(ncols=3, sharex=True, sharey=False)
+    x = dfl["Downsample (%)"].to_numpy()
+    y_acc, y_ec = dfl["Accuracy"].to_numpy(), dfl["EC"].to_numpy()
+
+    sbn.scatterplot(x=x, y=y_acc, color="black", label="Accuracy", s=5.0, ax=axes[0])
+    sbn.scatterplot(x=x, y=y_ec, color="red", label="EC", s=5.0, ax=axes[0])
+    sbn.lineplot(
+        data=dfl,
+        x=x,
+        y="lowess_acc",
+        color="black",
+        label=None,
+        ax=axes[0],
+    )
+    sbn.lineplot(
+        data=dfl,
+        x=x,
+        y="lowess_ec",
+        color="red",
+        label=None,
+        ax=axes[0],
+    )
+
+    ax2: Axes = axes[1]
+    ax3: Axes = axes[2]
+    window_width = 10
+    n_boot = 100
+    start = 0
+
+    w_mean, acc_corrs, ec_corrs = [], [], []
+    r_acc, r_acc_min, r_acc_max = [], [], []
+    r_ec, r_ec_min, r_ec_max = [], [], []
+    while True:
+        idx = slice(start, start + min(window_width, len(x) + 1))
+        x_window = x[idx]
+        if len(x_window) < window_width:
+            break
+
+        w_mean.append(np.max(x_window))
+        r_accs, r_ecs = [], []
+        acc = y_acc[idx]
+        ec = y_ec[idx]
+        idx = np.arange(len(x_window))
+        for _ in range(n_boot):
+            idx_boot = np.random.choice(idx, size=window_width, replace=True)
+            x_boot = x_window[idx_boot]
+            acc_boot = acc[idx_boot]
+            ec_boot = ec[idx_boot]
+            r_accs.append(LinResult(x_boot, acc_boot).r)
+            r_ecs.append(LinResult(x_boot, ec_boot).r)
+        r_acc.append(np.mean(r_accs))
+        r_acc_min.append(np.min(r_accs))
+        r_acc_max.append(np.max(r_accs))
+        r_ec.append(np.mean(r_ecs))
+        r_ec_min.append(np.min(r_ecs))
+        r_ec_max.append(np.max(r_ecs))
+        start += 1
+
+    sbn.scatterplot(
+        x=w_mean,
+        y=r_acc,
+        color="black",
+        label="r(d, acc)",
+        ax=ax2,
+    )
+    sbn.scatterplot(
+        x=w_mean,
+        y=r_ec,
+        color="red",
+        label="r(d, EC)",
+        ax=ax2,
+    )
+
+    sbn.scatterplot(
+        x=w_mean,
+        y=acc_ps,
+        color="black",
+        label="Correlation p-value",
+        ax=ax3,
+    )
+    sbn.scatterplot(
+        x=w_mean,
+        y=ec_ps,
+        color="red",
+        # label="r(EC, acc)",
+        ax=ax3,
+    )
+
+    r_acc_smooth = lowess(exog=w_mean, endog=acc_corrs, return_sorted=False)
+    r_ec_smooth = lowess(exog=w_mean, endog=ec_corrs, return_sorted=False)
+    r_acc_p_smooth = lowess(exog=w_mean, endog=acc_ps, return_sorted=False)
+    r_ec_p_smooth = lowess(exog=w_mean, endog=ec_ps, return_sorted=False)
+
+    sbn.lineplot(
+        x=w_mean,
+        y=r_acc_smooth,
+        color="black",
+        ax=ax2,
+    )
+    sbn.lineplot(
+        x=w_mean,
+        y=r_ec_smooth,
+        color="red",
+        ax=ax2,
+    )
+    sbn.lineplot(
+        x=w_mean,
+        y=r_acc_p_smooth,
+        color="black",
+        ax=ax3,
+    )
+    sbn.lineplot(
+        x=w_mean,
+        y=r_ec_p_smooth,
+        color="red",
+        ax=ax3,
+    )
 
     # Correlation analysis
     x, y = df["Downsample (%)"], df["EC"]
@@ -636,23 +753,24 @@ def diabetes_svm_plot_stats() -> None:
     ensure_dir(out.parent)
     grid.savefig(out, dpi=600)
     print(f"Saved plot to {out}")
-    plt.show()
+    # plt.show()
 
 
 if __name__ == "__main__":
     DATASETS = [
-        Dataset.Diabetes,
+        # Dataset.Diabetes,
         # Dataset.Parkinsons,
         # Dataset.SPECT,
         # Dataset.Transfusion,
         # Dataset.HeartFailure,
+        Dataset.Diabetes130,
         # Dataset.MimicIV,
         # Dataset.UTIResistance,
     ]
-    make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
+    # make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
     make_montage_plots(DATASETS)
-    # make_individual_plots(DATASETS, kinds=[*ClassifierKind])
-    # diabetes_svm_plot_stats()
+    make_individual_plots(DATASETS, kinds=[*ClassifierKind])
+    # diabetes_svm_plot_stats(force=False)
     # print_data_tables()
     # make_table(force=False)
     # print_tabular_info(datasets=DATASETS)

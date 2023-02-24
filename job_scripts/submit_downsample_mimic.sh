@@ -1,9 +1,8 @@
 #!/bin/bash
 #SBATCH --account=def-jlevman
-#SBATCH --time=00-01:00:00
-#SBATCH --job-name=val_slow
-#SBATCH --output=eval_slow_%j__%A_%a.out
-#SBATCH --array=0-799
+#SBATCH --time=00-23:59:59
+#SBATCH --job-name=mimic-iv
+#SBATCH --output=mimic-iv_%j__%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=80

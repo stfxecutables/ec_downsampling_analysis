@@ -48,14 +48,12 @@ def svm_hparams(
         ContinuousHparam(
             "C",
             C,
-            max=1e5,
-            min=1e-10,
+            max=1e3,
+            min=1e-5,
             log_scale=True,
             default=1.0,
         ),
-        ContinuousHparam(
-            "gamma", gamma, max=1e10, min=1e-10, log_scale=True, default=0.1
-        ),
+        ContinuousHparam("gamma", gamma, max=1e3, min=1e-10, log_scale=True, default=0.1),
         CategoricalHparam(
             "shrinking",
             value=shrinking,
