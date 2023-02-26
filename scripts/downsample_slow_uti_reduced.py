@@ -40,7 +40,7 @@ if __name__ == "__main__":
                 downsample=True,
                 n_reps=200,
                 n_runs=10,
-                only_rep=args.only_rep,
+                # only_rep=args.only_rep,
             )
 
     else:
