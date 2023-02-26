@@ -18,19 +18,19 @@ from src.enumerables import ClassifierKind, Dataset
 from src.prediction import evaluate_downsampling
 
 if __name__ == "__main__":
-    MAX_WORKERS = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
     grid = [
         Namespace(**args)
         for args in list(
             ParameterGrid(
-                {"dataset": [Dataset.Diabetes130Reduced], "kind": [*ClassifierKind]}
+                {
+                    "dataset": [Dataset.UTIResistanceReduced],
+                    "kind": [*ClassifierKind],
+                    "only_rep": list(range(200)),
+                }
             )
-            # ParameterGrid({"dataset": Dataset.very_fast(), "kind": [*ClassifierKind]})
-            # ParameterGrid({"dataset": [Dataset.Diabetes], "kind": [*ClassifierKind]})
-            # ParameterGrid({"dataset": [Dataset.Diabetes], "kind": [ClassifierKind.SVM]})
         )
     ]
-    print(f"Total number of combinations: {len(grid)}")
+    print(f"Total number of combinations: {len(grid)}")  # 800
     idx = os.environ.get("SLURM_ARRAY_TASK_ID")
     if idx is None:
         for args in grid:
@@ -40,6 +40,7 @@ if __name__ == "__main__":
                 downsample=True,
                 n_reps=200,
                 n_runs=10,
+                only_rep=args.only_rep,
             )
 
     else:
@@ -51,5 +52,5 @@ if __name__ == "__main__":
             downsample=True,
             n_reps=200,
             n_runs=10,
-            max_workers=MAX_WORKERS,
+            only_rep=args.only_rep,
         )

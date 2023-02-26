@@ -159,6 +159,8 @@ def get_xgb_tqdm_workers(
         Dataset.SPECT,
         Dataset.Transfusion,
         Dataset.HeartFailure,
+        Dataset.Diabetes130,
+        Dataset.Diabetes130Reduced,
     ]
     if dataset in fasts:  # classifier irrelevant
         xgb_workers = 1
@@ -186,11 +188,23 @@ def get_xgb_tqdm_workers(
             ClassifierKind.GBT: 30,
             ClassifierKind.RF: 30,
         },
+        Dataset.UTIResistanceReduced: {
+            ClassifierKind.SVM: 40,
+            ClassifierKind.LR: 40,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
         Dataset.MimicIV: {
             ClassifierKind.SVM: 8,
             ClassifierKind.LR: 8,
             ClassifierKind.GBT: 20,
             ClassifierKind.RF: 20,
+        },
+        Dataset.MimicIVReduced: {
+            ClassifierKind.SVM: 40,
+            ClassifierKind.LR: 40,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
         },
     }[dataset][classifier]
     xgb_workers = n_cpu // tqdm_max_workers

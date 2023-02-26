@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple, Union
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,15 +29,20 @@ from statsmodels.api import OLS
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from statsmodels.regression.rolling import RollingOLS
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from src.constants import PLOTS, TABLES, ensure_dir
 from src.enumerables import ClassifierKind, Dataset
 from src.metrics import acc_pairs, accs, ecs
 from src.prediction import pred_root
 
+matplotlib.use("QtAgg")
+
 OUT = ensure_dir(PLOTS / "downsampling")
+DETAILED = ensure_dir(OUT / "detailed")
 MONTAGES = ensure_dir(OUT / "montage")
 INDIVIDUALS = ensure_dir(OUT / "individual")
+CORRELATIONS = ensure_dir(OUT / "correlations")
 MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
 CLASSIFIER_ORDER = ["LR", "SVM", "RF", "GBT"]
 
@@ -179,15 +185,20 @@ def summarize_results(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True
 ) -> None:
     LW = 1.0
-    reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
-    df_pair, df_run = get_rep_dfs(reps)
-    df_pair["down"] *= 100
-    df_run["down"] *= 100
+    # reps = load_preds(dataset=dataset, kind=kind, downsample=downsample)
+    # df_pair, df_run = get_rep_dfs(reps)
+    # df_pair["down"] *= 100
+    # df_run["down"] *= 100
+    df_pair, df_run = make_table(
+        dataset=dataset, kind=kind, downsample=downsample, force=False
+    )
     renames = {"acc": "Accuracy", "ec": "EC", "down": "Downsample (%)"}
     df_pair.rename(columns=renames, inplace=True)
     df_run.rename(columns=renames, inplace=True)
 
-    means = df_pair.groupby("rep").mean()  # columns = ["acc", "ec", "down"]
+    means = df_pair.groupby("rep").mean(
+        numeric_only=True
+    )  # columns = ["acc", "ec", "down"]
     acc_ec = LinResult(x=means["Accuracy"], y=means["EC"])
     down_acc = LinResult(x=means["Downsample (%)"], y=means["Accuracy"])
     down_ec = LinResult(x=means["Downsample (%)"], y=means["EC"])
@@ -197,7 +208,7 @@ def summarize_results(
     fig: Figure
     args = dict(height=3.5, aspect=1.5, color="black")
     subtitle = f"\n{dataset.name} - {kind.name}"
-    outdir = ensure_dir(OUT / f"{dataset.value}/{kind.value}")
+    outdir = ensure_dir(DETAILED / f"{dataset.value}/{kind.value}")
 
     grid = sbn.relplot(data=means, x="Accuracy", y="EC", size="Downsample (%)", **args)
     fig, ax = grid.fig, grid.fig.axes[0]
@@ -238,10 +249,10 @@ def summarize_results(
     fig.savefig(str(outdir / "downsample_vs_mean_pairwise_accs_by_mean_ec.png"), dpi=600)
     plt.close()
 
-    mean_accs = df_run.groupby("rep").mean()["Accuracy"]
-    downs = df_run.groupby("rep").mean()["Downsample (%)"]
+    mean_accs = df_run.groupby("rep").mean(numeric_only=True)["Accuracy"]
+    downs = df_run.groupby("rep").mean(numeric_only=True)["Downsample (%)"]
     downs.name = "Downsample (%)"
-    mean_ecs = df_pair.groupby("rep").mean()["EC"]
+    mean_ecs = df_pair.groupby("rep").mean(numeric_only=True)["EC"]
     macc_mec = LinResult(x=mean_accs, y=mean_ecs)
     grid = sbn.relplot(x=mean_accs, y=mean_ecs, size=downs, **args)
     fig, ax = grid.fig, grid.fig.axes[0]
@@ -496,7 +507,12 @@ def get_lowess_fits(df: DataFrame) -> DataFrame:
     return pd.concat([df, acc_lowess, ec_lowess], axis=1)
 
 
-def make_lowess_plot(df_sub: DataFrame, individual: bool = False) -> FacetGrid:
+def make_lowess_plot(
+    df_sub: DataFrame,
+    split_axes: bool = False,
+    individual: bool = False,
+    **kwargs,
+) -> FacetGrid:
     col_args = (
         dict()
         if individual
@@ -509,24 +525,48 @@ def make_lowess_plot(df_sub: DataFrame, individual: bool = False) -> FacetGrid:
     grid: FacetGrid = sbn.relplot(
         data=df_sub,
         height=3,
-        aspect=1.25,
+        aspect=1.25,  # type: ignore
         x="Downsample (%)",
         y="Accuracy",
         color="black",
         label="Accuracy",
         s=5.0,
         **col_args,
+        **kwargs,
     )
     grid.map(sbn.lineplot, "Downsample (%)", "lowess_acc", color="black", label=None)
-    grid.map(sbn.lineplot, "Downsample (%)", "lowess_ec", color="red", label=None)
-    grid.map(
-        sbn.scatterplot,
-        "Downsample (%)",
-        "EC",
-        color="red",
-        label="EC",
-        s=5.0,
-    )
+
+    if split_axes:
+        for ax in grid.figure.axes:
+            axx = ax.twinx()
+            sbn.scatterplot(
+                data=df_sub,
+                x="Downsample (%)",
+                y="EC",
+                color="red",
+                label="EC",
+                s=5.0,
+                ax=axx,
+            )
+            sbn.lineplot(
+                data=df_sub,
+                x="Downsample (%)",
+                y="lowess_ec",
+                color="red",
+                label=None,
+                ax=axx,
+            )
+    else:
+        grid.map(
+            sbn.scatterplot,
+            "Downsample (%)",
+            "EC",
+            color="red",
+            label="EC",
+            s=5.0,
+        )
+        grid.map(sbn.lineplot, "Downsample (%)", "lowess_ec", color="red", label=None)
+
     grid.add_legend()
     sbn.move_legend(grid, loc="upper right")
     grid.set_axis_labels(y_var="Mean EC or Accuracy", x_var="Downsampling Percent")
@@ -539,7 +579,128 @@ def make_lowess_plot(df_sub: DataFrame, individual: bool = False) -> FacetGrid:
     return grid
 
 
-def make_montage_plots(datasets: List[Dataset]) -> None:
+def make_custom_lowess_plot(
+    df_sub: DataFrame,
+    split_axes: bool = False,
+    individual: bool = False,
+    **kwargs,
+) -> Figure:
+    col_args = (
+        dict()
+        if individual
+        else dict(
+            col="classifier",
+            col_wrap=2,
+            col_order=CLASSIFIER_ORDER,
+        )
+    )
+    ax: Axes
+    axt: Axes
+    sbn.set_style("white")
+    fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=False)
+    for i, (ax, classifier) in enumerate(zip(axes.flat, CLASSIFIER_ORDER)):
+        sbn.scatterplot(
+            data=df_sub[df_sub.classifier == classifier],
+            x="Downsample (%)",
+            y="Accuracy",
+            color="black",
+            label="Accuracy" if i == 0 else None,
+            legend=False,
+            s=5.0,
+            **kwargs,
+            ax=ax,
+        )
+        sbn.lineplot(
+            data=df_sub[df_sub.classifier == classifier],
+            x="Downsample (%)",
+            y="lowess_acc",
+            color="black",
+            label=None,
+            **kwargs,
+            ax=ax,
+        )
+        axt = ax.twinx() if split_axes else ax
+        sbn.scatterplot(
+            data=df_sub[df_sub.classifier == classifier],
+            x="Downsample (%)",
+            y="EC",
+            color="red",
+            label="EC" if i == 0 else None,
+            legend=False,
+            s=5.0,
+            ax=axt if split_axes else ax,
+        )
+        sbn.lineplot(
+            data=df_sub[df_sub.classifier == classifier],
+            x="Downsample (%)",
+            y="lowess_ec",
+            color="red",
+            label=None,
+            ax=axt if split_axes else ax,
+        )
+        ax.set_title(classifier)
+        ax.ticklabel_format(useOffset=False)
+        axt.ticklabel_format(useOffset=False)
+        if split_axes:
+            if i in [0, 2]:
+                ax.set_ylabel("Accuracy")
+            else:
+                ax.set_ylabel("")
+        if split_axes:
+            if i in [1, 3]:
+                axt.set_ylabel("EC")
+            else:
+                axt.set_ylabel("")
+        if not split_axes and (i in [0, 2]):
+            ax.set_ylabel("Accuracy or EC")
+        ax.set_xlabel("Downsampling Percent")
+    # grid.set_axis_labels(y_var="Mean EC or Accuracy", x_var="Downsampling Percent")
+    # if individual:
+    #     classifier = df_sub.classifier.unique().item()
+    #     grid.set_titles(classifier)
+    # else:
+    #     grid.set_titles("{col_name}")
+    return fig
+
+
+def make_montage_plots(datasets: List[Dataset], norm: bool = False) -> None:
+    df_pairs, df_runs = make_tables(
+        datasets=datasets, kinds=[*ClassifierKind], force=False
+    )
+    ec_means = (
+        df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
+        .groupby(["data", "classifier", "rep"])
+        .mean()
+    )
+    acc_means = df_runs.groupby(["data", "classifier", "rep"]).mean()
+    df_means = pd.concat([acc_means, ec_means], axis=1).reset_index()
+
+    for data in datasets:
+        dsname = data.name
+        df = df_means.loc[df_means.data == dsname].reset_index()
+        if norm:
+            amean = df["Accuracy"].mean()
+            ec_mean = df["EC"].mean()
+            df["Accuracy"] = df["Accuracy"] - amean
+            df["EC"] = df["EC"] - ec_mean
+            df["Accuracy"] /= df["Accuracy"].std()
+            df["EC"] /= df["EC"].std()
+        dfl = get_lowess_fits(df)
+        sbn.set_style("darkgrid")
+        grid: FacetGrid = make_lowess_plot(dfl, split_axes=True)
+        grid._sharey = False
+
+        grid.fig.subplots_adjust(right=0.95)
+        grid.fig.suptitle(data.name)
+        grid.tight_layout()
+        plt.show()
+        out = MONTAGES / f"{data.value}.png"
+        grid.savefig(out, dpi=600)
+        print(f"Saved plot to {out}")
+        plt.close()
+
+
+def make_custom_montage_plots(datasets: List[Dataset]) -> None:
     df_pairs, df_runs = make_tables(
         datasets=datasets, kinds=[*ClassifierKind], force=False
     )
@@ -556,13 +717,16 @@ def make_montage_plots(datasets: List[Dataset]) -> None:
         df = df_means.loc[df_means.data == dsname].reset_index()
         dfl = get_lowess_fits(df)
         sbn.set_style("darkgrid")
-        grid: FacetGrid = make_lowess_plot(dfl)
-
-        grid.fig.subplots_adjust(right=0.95)
-        grid.fig.suptitle(data.name)
-        grid.tight_layout()
-        out = MONTAGES / f"{data.value}.png"
-        grid.savefig(out, dpi=600)
+        fig: Figure = make_custom_lowess_plot(dfl, split_axes=True)
+        fig.set_size_inches(w=12, h=8)
+        fig.legend().set_visible(True)
+        sbn.move_legend(fig, loc="upper right")
+        fig.subplots_adjust(right=0.95)
+        fig.suptitle(data.name)
+        fig.tight_layout()
+        # plt.show()
+        out = MONTAGES / f"{data.value}_split_axes.png"
+        fig.savefig(out, dpi=600)
         print(f"Saved plot to {out}")
         plt.close()
 
@@ -605,90 +769,251 @@ def make_individual_plots(datasets: List[Dataset], kinds: List[ClassifierKind]) 
             plt.close()
 
 
-def diabetes_svm_plot_stats(force: bool = False) -> None:
-    data = Dataset.Diabetes
+@dataclass
+class BootArgs:
+    idx: ndarray
+    x_w: ndarray
+    acc_s: ndarray
+    ec_s: ndarray
+    n_boot: ndarray
+    window_width: int
+
+
+@dataclass
+class BootResult:
+    r_acc_mean: float
+    r_acc_025: float
+    r_acc_975: float
+    r_ec_mean: float
+    r_ec_025: float
+    r_ec_975: float
+    w_mean: float
+
+
+def boot_resample(boot_args: BootArgs) -> BootResult:
+    idx = boot_args.idx
+    x_w = boot_args.x_w
+    acc_s = boot_args.acc_s
+    ec_s = boot_args.ec_s
+    n_boot = boot_args.n_boot
+    window_width = boot_args.window_width
+
+    ws, r_accs, r_ecs = [], [], []
+    acc_w = acc_s[idx]
+    ec_w = ec_s[idx]
+    idx = np.arange(len(x_w))
+    for _ in range(n_boot):
+        idx_boot = np.random.choice(idx, size=window_width, replace=True)
+        x_boot = x_w[idx_boot]
+        acc_boot = acc_w[idx_boot]
+        ec_boot = ec_w[idx_boot]
+        r_accs.append(LinResult(x_boot, acc_boot).r)
+        r_ecs.append(LinResult(x_boot, ec_boot).r)
+        ws.append(np.mean(x_boot))
+    r_acc_desc = Series(r_accs).describe(percentiles=[0.025, 0.975])
+    r_ec_desc = Series(r_ecs).describe(percentiles=[0.025, 0.975])
+
+    return BootResult(
+        r_acc_mean=float(r_acc_desc["mean"]),
+        r_acc_025=float(r_acc_desc["2.5%"]),
+        r_acc_975=float(r_acc_desc["97.5%"]),
+        r_ec_mean=float(r_ec_desc["mean"]),
+        r_ec_025=float(r_ec_desc["2.5%"]),
+        r_ec_975=float(r_ec_desc["97.5%"]),
+        w_mean=float(np.mean(ws)),
+    )
+
+
+def plot_correlations(
+    data: Dataset, means: bool = True, dpi: int = 300, force: bool = False
+) -> None:
+    ALPHA = 0.05
     dsname = data.name
-    kind = ClassifierKind.SVM
-    df_pairs, df_runs = make_table(dataset=data, kind=kind, force=force)
-    ec_means = (
-        df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
-        .groupby(["data", "classifier", "rep"])
-        .mean()
+    m = "means" if means else "pairwise"
+    out = CORRELATIONS / f"{dsname.lower()}_{m}.png"
+    if out.exists():
+        return
+    window_widths = [10, 25, 50] if means else [500, 1000, 2000]
+    fig, axes = plt.subplots(
+        nrows=len(ClassifierKind), ncols=1 + len(window_widths), sharex=True, sharey=False
     )
-    acc_means = df_runs.groupby(["data", "classifier", "rep"]).mean()
-    df_means = pd.concat([acc_means, ec_means], axis=1).reset_index().drop(columns="rep")
-    df = df_means.loc[df_means.data == dsname].reset_index().drop(columns="index")
-    dfl = get_lowess_fits(df)
-    df = dfl.loc[dfl.classifier == kind.name].reset_index()
-
-    fig, axes = plt.subplots(ncols=3, sharex=True, sharey=False)
-    x = dfl["Downsample (%)"].to_numpy()
-    y_acc, y_ec = dfl["Accuracy"].to_numpy(), dfl["EC"].to_numpy()
-
-    sbn.scatterplot(x=x, y=y_acc, color="black", label="Accuracy", s=5.0, ax=axes[0])
-    sbn.scatterplot(x=x, y=y_ec, color="red", label="EC", s=5.0, ax=axes[0])
-    sbn.lineplot(
-        data=dfl,
-        x=x,
-        y="lowess_acc",
-        color="black",
-        label=None,
-        ax=axes[0],
+    fig.set_size_inches(w=20, h=20)
+    fig.suptitle(
+        f"Rolling Correlations between Downsampling and Accuracy / EC - {dsname}"
     )
-    sbn.lineplot(
-        data=dfl,
-        x=x,
-        y="lowess_ec",
-        color="red",
-        label=None,
-        ax=axes[0],
-    )
+    for row, kind in enumerate(ClassifierKind):
+        df_pairs, df_runs = make_table(dataset=data, kind=kind, force=force)
+        if means:
+            ec_means = (
+                df_pairs.drop(columns=["Downsample (%)", "Accuracy"])
+                .groupby(["data", "classifier", "rep"])
+                .mean()
+            )
+            acc_means = df_runs.groupby(["data", "classifier", "rep"]).mean()
+            df_means = (
+                pd.concat([acc_means, ec_means], axis=1).reset_index().drop(columns="rep")
+            )
+            df = df_means.loc[df_means.data == dsname].reset_index().drop(columns="index")
+        else:
+            df = df_pairs.loc[df_pairs.data == dsname]
 
-    ax2: Axes = axes[1]
-    ax3: Axes = axes[2]
-    window_width = 10
-    n_boot = 100
-    start = 0
+        dfl = get_lowess_fits(df)
+        df = dfl.loc[dfl.classifier == kind.name].reset_index()
 
-    w_mean, acc_corrs, ec_corrs = [], [], []
-    r_acc, r_acc_min, r_acc_max = [], [], []
-    r_ec, r_ec_min, r_ec_max = [], [], []
-    while True:
-        idx = slice(start, start + min(window_width, len(x) + 1))
-        x_window = x[idx]
-        if len(x_window) < window_width:
-            break
+        x = dfl["Downsample (%)"].to_numpy()
+        y_acc, y_ec = dfl["Accuracy"].to_numpy(), dfl["EC"].to_numpy()
+        idx_sort = np.argsort(x)
+        x_s = x.copy()[idx_sort]
+        acc_s = y_acc.copy()[idx_sort]
+        ec_s = y_ec.copy()[idx_sort]
 
-        w_mean.append(np.max(x_window))
-        r_accs, r_ecs = [], []
-        acc = y_acc[idx]
-        ec = y_ec[idx]
-        idx = np.arange(len(x_window))
-        for _ in range(n_boot):
-            idx_boot = np.random.choice(idx, size=window_width, replace=True)
-            x_boot = x_window[idx_boot]
-            acc_boot = acc[idx_boot]
-            ec_boot = ec[idx_boot]
-            r_accs.append(LinResult(x_boot, acc_boot).r)
-            r_ecs.append(LinResult(x_boot, ec_boot).r)
-        r_acc.append(np.mean(r_accs))
-        r_acc_min.append(np.min(r_accs))
-        r_acc_max.append(np.max(r_accs))
-        r_ec.append(np.mean(r_ecs))
-        r_ec_min.append(np.min(r_ecs))
-        r_ec_max.append(np.max(r_ecs))
-        start += 1
+        sbn.scatterplot(
+            x=x, y=y_acc, color="black", label="Accuracy", s=5.0, ax=axes[row][0]
+        )
+        sbn.scatterplot(x=x, y=y_ec, color="red", label="EC", s=5.0, ax=axes[row][0])
+        sbn.lineplot(
+            data=dfl,
+            x=x,
+            y="lowess_acc",
+            color="black",
+            label=None,
+            ax=axes[row][0],
+        )
+        sbn.lineplot(
+            data=dfl,
+            x=x,
+            y="lowess_ec",
+            color="red",
+            label=None,
+            ax=axes[row][0],
+        )
+        axes[row][0].set_xlabel("Downsampling (%)")
+        axes[row][0].set_ylabel("Accuracy or Consistency")
+
+        n_boot = 500
+        delta = 1 if means else 100
+
+        for i, window_width in tqdm(enumerate(window_widths), leave=True):
+            ax = axes[row][i + 1]
+            w_mean = []
+            r_acc_mean, r_acc_025, r_acc_975 = [], [], []
+            r_ec_mean, r_ec_025, r_ec_975 = [], [], []
+            start = 0
+            idxs = []
+            while True:
+                idx = slice(start, start + min(window_width, len(x) + 1))
+                x_w = x_s[idx]
+                if len(x_w) < window_width:
+                    break
+                idxs.append(idx)
+                start += 1
+            boot_args = [
+                BootArgs(
+                    idx=idx,
+                    x_w=x_s[idx],
+                    acc_s=acc_s,
+                    ec_s=ec_s,
+                    n_boot=n_boot,
+                    window_width=window_width,
+                )
+                for idx in idxs
+            ]
+            results: List[BootResult] = process_map(
+                boot_resample,
+                boot_args,
+                total=len(idxs),
+                desc="Bootstrapping",
+                chunksize=1,
+            )
+
+            # for x_w, idx in tqdm(zip(x_ws, idxs), total=len(x_ws), desc="Bootstrapping"):
+            #     ws, r_accs, r_ecs = [], [], []
+            #     acc_w = acc_s[idx]
+            #     ec_w = ec_s[idx]
+            #     idx = np.arange(len(x_w))
+            #     r_accs, r_ecs, ws = list(zip(*res))
+            #     for _ in range(n_boot):
+            #         idx_boot = np.random.choice(idx, size=window_width, replace=True)
+            #         x_boot = x_w[idx_boot]
+            #         acc_boot = acc_w[idx_boot]
+            #         ec_boot = ec_w[idx_boot]
+            #         r_accs.append(LinResult(x_boot, acc_boot).r)
+            #         r_ecs.append(LinResult(x_boot, ec_boot).r)
+            #         ws.append(np.mean(x_boot))
+            #     r_acc_desc = Series(r_accs).describe(percentiles=[0.025, 0.975])
+            #     r_acc_mean.append(r_acc_desc["mean"])
+            #     r_acc_025.append(r_acc_desc["2.5%"])
+            #     r_acc_975.append(r_acc_desc["97.5%"])
+
+            #     r_ec_desc = Series(r_ecs).describe(percentiles=[0.025, 0.975])
+            #     r_ec_mean.append(r_ec_desc["mean"])
+            #     r_ec_025.append(r_ec_desc["2.5%"])
+            #     r_ec_975.append(r_ec_desc["97.5%"])
+
+            #     w_mean.append(np.mean(ws))
+
+            r_acc_mean = [result.r_acc_mean for result in results]
+            r_acc_025 = [result.r_acc_025 for result in results]
+            r_acc_975 = [result.r_acc_975 for result in results]
+
+            r_ec_mean = [result.r_ec_mean for result in results]
+            r_ec_025 = [result.r_ec_025 for result in results]
+            r_ec_975 = [result.r_ec_975 for result in results]
+
+            w_mean = [result.w_mean for result in results]
+
+            r_acc_mean_smooth = lowess(exog=w_mean, endog=r_acc_mean, return_sorted=False)
+            r_acc_025_smooth = lowess(exog=w_mean, endog=r_acc_025, return_sorted=False)
+            r_acc_975_smooth = lowess(exog=w_mean, endog=r_acc_975, return_sorted=False)
+
+            r_ec_mean_smooth = lowess(exog=w_mean, endog=r_ec_mean, return_sorted=False)
+            r_ec_025_smooth = lowess(exog=w_mean, endog=r_ec_025, return_sorted=False)
+            r_ec_975_smooth = lowess(exog=w_mean, endog=r_ec_975, return_sorted=False)
+
+            sbn.lineplot(
+                x=w_mean,
+                y=r_acc_mean_smooth,
+                color="black",
+                label="r(d, acc)",
+                ax=ax,
+            )
+            ax.fill_between(
+                x=w_mean,
+                y1=r_acc_025_smooth,
+                y2=r_acc_975_smooth,
+                color="black",
+                alpha=ALPHA,
+            )
+            sbn.lineplot(
+                x=w_mean,
+                y=r_ec_mean_smooth,
+                color="red",
+                label="r(d, EC)",
+                ax=ax,
+            )
+            ax.fill_between(
+                x=w_mean, y1=r_ec_025_smooth, y2=r_ec_975_smooth, color="red", alpha=ALPHA
+            )
+            ax.set_title(f"{kind.name}: window = {window_width}")
+            ax.set_xlabel("Downsampling (%)")
+            ax.set_ylabel(r"Correlation ($\rho$)")
+
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.9)
+    fig.savefig(str(out), dpi=dpi)
+    plt.close()
+    return
 
     sbn.scatterplot(
         x=w_mean,
-        y=r_acc,
+        y=r_acc_desc,
         color="black",
         label="r(d, acc)",
         ax=ax2,
     )
     sbn.scatterplot(
         x=w_mean,
-        y=r_ec,
+        y=r_ec_mean,
         color="red",
         label="r(d, EC)",
         ax=ax2,
@@ -708,11 +1033,6 @@ def diabetes_svm_plot_stats(force: bool = False) -> None:
         # label="r(EC, acc)",
         ax=ax3,
     )
-
-    r_acc_smooth = lowess(exog=w_mean, endog=acc_corrs, return_sorted=False)
-    r_ec_smooth = lowess(exog=w_mean, endog=ec_corrs, return_sorted=False)
-    r_acc_p_smooth = lowess(exog=w_mean, endog=acc_ps, return_sorted=False)
-    r_ec_p_smooth = lowess(exog=w_mean, endog=ec_ps, return_sorted=False)
 
     sbn.lineplot(
         x=w_mean,
@@ -764,16 +1084,21 @@ if __name__ == "__main__":
         # Dataset.Transfusion,
         # Dataset.HeartFailure,
         Dataset.Diabetes130,
+        Dataset.Diabetes130Reduced,
         # Dataset.MimicIV,
         # Dataset.UTIResistance,
     ]
     # make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
-    make_montage_plots(DATASETS)
-    make_individual_plots(DATASETS, kinds=[*ClassifierKind])
-    # diabetes_svm_plot_stats(force=False)
+    # make_montage_plots(DATASETS, norm=False)
+    make_custom_montage_plots(DATASETS)
+    # make_individual_plots(DATASETS, kinds=[*ClassifierKind])
+    # for data in DATASETS:
+    #     plot_correlations(data=data, force=False, dpi=300, means=False)
     # print_data_tables()
     # make_table(force=False)
     # print_tabular_info(datasets=DATASETS)
-    # for dataset in DATASETS:
-    #     for kind in ClassifierKind:
+    # for dataset in tqdm(DATASETS, leave=True, desc="Plotting data", ncols=120):
+    #     for kind in tqdm(
+    #         ClassifierKind, leave=True, desc="Plotting classifiers", ncols=120
+    #     ):
     #         summarize_results(dataset=dataset, kind=kind, downsample=True)

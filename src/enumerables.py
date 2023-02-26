@@ -36,11 +36,13 @@ from typing_extensions import Literal
 from src.loading import (
     load_diabetes,
     load_diabetes130,
+    load_diabetes130_continuous,
     load_heart_failure,
     load_mimic_iv,
     load_park,
     load_SPECT,
     load_trans,
+    load_uti_reduced,
     load_uti_resistance,
 )
 
@@ -51,9 +53,12 @@ class Dataset(Enum):
     Parkinsons = "park"
     SPECT = "spect"
     Diabetes130 = "diab130"
+    Diabetes130Reduced = "diab130-reduced"
     HeartFailure = "heart"
     MimicIV = "mimic"
+    MimicIVReduced = "mimic-reduced"
     UTIResistance = "uti"
+    UTIResistanceReduced = "uti-reduced"
 
     def load(self) -> Tuple[DataFrame, Series]:
         loaders: Dict[Dataset, Callable[[], Tuple[DataFrame, Series]]] = {
@@ -62,11 +67,50 @@ class Dataset(Enum):
             Dataset.Parkinsons: load_park,
             Dataset.SPECT: load_SPECT,
             Dataset.Diabetes130: load_diabetes130,
+            Dataset.Diabetes130Reduced: lambda: load_diabetes130_continuous(
+                self.n_reduce()
+            ),
             Dataset.HeartFailure: load_heart_failure,
-            Dataset.MimicIV: load_mimic_iv,
+            Dataset.MimicIV: lambda: load_mimic_iv(),
+            Dataset.MimicIVReduced: lambda: load_mimic_iv(n_components=self.n_reduce()),
             Dataset.UTIResistance: load_uti_resistance,
+            Dataset.UTIResistanceReduced: lambda: load_uti_reduced(
+                n_components=self.n_reduce()
+            ),
         }
         return loaders[self]()
+
+    def n_categoricals(self) -> int:
+        counts: Dict[Dataset, int] = {
+            Dataset.Diabetes: -1,
+            Dataset.Transfusion: -1,
+            Dataset.Parkinsons: -1,
+            Dataset.SPECT: -1,
+            Dataset.Diabetes130: 35,
+            Dataset.Diabetes130Reduced: 35,
+            Dataset.HeartFailure: 0,
+            Dataset.MimicIV: 40,
+            Dataset.MimicIVReduced: 40,
+            Dataset.UTIResistance: 713,
+            Dataset.UTIResistanceReduced: 713,
+        }
+        return counts[self]
+
+    def n_reduce(self) -> int:
+        counts: Dict[Dataset, int] = {
+            Dataset.Diabetes: -1,
+            Dataset.Transfusion: -1,
+            Dataset.Parkinsons: -1,
+            Dataset.SPECT: -1,
+            Dataset.Diabetes130: 5,
+            Dataset.Diabetes130Reduced: 5,
+            Dataset.HeartFailure: 0,
+            Dataset.MimicIV: 5,
+            Dataset.MimicIVReduced: 5,
+            Dataset.UTIResistance: 100,
+            Dataset.UTIResistanceReduced: 100,
+        }
+        return counts[self]
 
     @staticmethod
     def fast() -> List[Dataset]:

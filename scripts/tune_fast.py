@@ -23,13 +23,14 @@ if __name__ == "__main__":
         for args in list(
             ParameterGrid(
                 {
-                    "dataset": [Dataset.Diabetes],
+                    # "dataset": [Dataset.Diabetes130Reduced],
+                    "dataset": [Dataset.MimicIVReduced],
                     # "dataset": Dataset.very_fast(),
                     "kind": [
-                        # ClassifierKind.GBT,
-                        # ClassifierKind.LR,
+                        ClassifierKind.GBT,
+                        ClassifierKind.LR,
                         ClassifierKind.SVM,
-                        # ClassifierKind.RF,
+                        ClassifierKind.RF,
                     ],
                 }
             )
@@ -44,7 +45,7 @@ if __name__ == "__main__":
                 classifier=args.kind,
                 dataset=args.dataset,
                 metric=Metric.Accuracy,
-                n_runs=1000,
+                n_runs=250,
                 force=True,
             )
 

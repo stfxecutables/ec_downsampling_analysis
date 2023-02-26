@@ -169,7 +169,12 @@ def get_xgb_tqdm_workers(
     tqdm_max_workers: int
     """
     n_cpu = 80 if os.environ.get("CC_CLUSTER") == "niagara" else 8
-    fasts = [Dataset.Diabetes, Dataset.Parkinsons, Dataset.SPECT, Dataset.Transfusion]
+    fasts = [
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+    ]
     if dataset in fasts:  # classifier irrelevant
         xgb_workers = 1
         tqdm_max_workers = n_cpu
@@ -189,6 +194,12 @@ def get_xgb_tqdm_workers(
             ClassifierKind.GBT: 40,
             ClassifierKind.RF: 40,
         },
+        Dataset.Diabetes130Reduced: {
+            ClassifierKind.SVM: 20,
+            ClassifierKind.LR: 20,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
         # Slow + Memory
         Dataset.UTIResistance: {
             ClassifierKind.SVM: 8,
@@ -196,11 +207,23 @@ def get_xgb_tqdm_workers(
             ClassifierKind.GBT: 30,
             ClassifierKind.RF: 30,
         },
+        Dataset.UTIResistanceReduced: {
+            ClassifierKind.SVM: 40,
+            ClassifierKind.LR: 40,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
+        },
         Dataset.MimicIV: {
             ClassifierKind.SVM: 8,
             ClassifierKind.LR: 8,
             ClassifierKind.GBT: 20,
             ClassifierKind.RF: 20,
+        },
+        Dataset.MimicIVReduced: {
+            ClassifierKind.SVM: 40,
+            ClassifierKind.LR: 40,
+            ClassifierKind.GBT: 40,
+            ClassifierKind.RF: 40,
         },
     }[dataset][classifier]
     xgb_workers = n_cpu // tqdm_max_workers

@@ -30,6 +30,7 @@ def ensure_dir(path: Path) -> Path:
 
 
 DATA: Path = ensure_dir(ROOT / "data")
+CAT_REDUCED: Path = ensure_dir(DATA / "cat_reduced")
 RESULTS = ensure_dir(ROOT / "results")
 PLOTS = ensure_dir(RESULTS / "plots")
 TABLES = ensure_dir(RESULTS / "tables")
