@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent  # isort: skip
 sys.path.append(str(ROOT))  # isort: skip
 # fmt: on
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +37,8 @@ from src.enumerables import ClassifierKind, Dataset
 from src.metrics import acc_pairs, accs, ecs
 from src.prediction import pred_root
 
-matplotlib.use("QtAgg")
+if not os.environ.get("CC_CLUSTER") == "niagara":
+    matplotlib.use("QtAgg")
 
 OUT = ensure_dir(PLOTS / "downsampling")
 DETAILED = ensure_dir(OUT / "detailed")
@@ -45,6 +47,7 @@ INDIVIDUALS = ensure_dir(OUT / "individual")
 CORRELATIONS = ensure_dir(OUT / "correlations")
 MEMOIZER = Memory(location=ROOT / "__JOBLIB_CACHE__", verbose=0)
 CLASSIFIER_ORDER = ["LR", "SVM", "RF", "GBT"]
+EXCEL_TABLES = ensure_dir(TABLES / "excel")
 
 
 @dataclass
@@ -131,7 +134,7 @@ DfPlus = Dict[str, Union[DataFrame, float]]
 def load_preds(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True
 ) -> List[Repeat]:
-    outdir = pred_root(dataset=dataset, kind=kind, downsample=True)
+    outdir = pred_root(dataset=dataset, kind=kind, downsample=downsample)
     rep_dirs = sorted(outdir.glob("rep*"))
     reps: List[Repeat] = []
     for rep_dir in tqdm(
@@ -287,8 +290,9 @@ def summarize_results(
 def make_table(
     dataset: Dataset, kind: ClassifierKind, downsample: bool = True, force: bool = False
 ) -> Tuple[DataFrame, DataFrame]:
-    pairs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_pairs.json"
-    runs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_runs.json"
+    d = "" if downsample else "_baseline"
+    pairs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_pairs{d}.json"
+    runs_out = TABLES / f"{dataset.value}_{kind.name.lower()}_runs{d}.json"
     if pairs_out.exists() and runs_out.exists() and not force:
         df_pair = pd.read_json(pairs_out)
         df_run = pd.read_json(runs_out)
@@ -654,6 +658,9 @@ def make_custom_lowess_plot(
         if not split_axes and (i in [0, 2]):
             ax.set_ylabel("Accuracy or EC")
         ax.set_xlabel("Downsampling Percent")
+        if i == 0:
+            ax.legend().set_visible(False)
+            axt.legend().set_visible(False)
     # grid.set_axis_labels(y_var="Mean EC or Accuracy", x_var="Downsampling Percent")
     # if individual:
     #     classifier = df_sub.classifier.unique().item()
@@ -1076,21 +1083,108 @@ def plot_correlations(
     # plt.show()
 
 
+def make_accuracy_table(downsample: bool = True) -> None:
+    datasets = [
+        Dataset.Diabetes,
+        Dataset.Parkinsons,
+        Dataset.SPECT,
+        Dataset.Transfusion,
+        Dataset.HeartFailure,
+        Dataset.Diabetes130Reduced,
+        Dataset.UTIResistanceReduced,
+        Dataset.MimicIVReduced,
+    ]
+    df_pairs, df_runs = make_tables(
+        datasets=datasets, kinds=[*ClassifierKind], force=False, downsample=downsample
+    )
+    df_pairs["Accuracy"] *= 100
+    df_pairs["EC"] *= 100
+
+    dfpl = df_pairs.loc[df_pairs["Downsample (%)"] > 89, :]
+    pmeans = (
+        df_pairs.drop(columns=["Downsample (%)", "rep"])
+        .groupby(["data", "classifier"])
+        .describe()
+        .reset_index()
+        .loc[
+            :,
+            [
+                ("data", ""),
+                ("classifier", ""),
+                ("Accuracy", "mean"),
+                ("Accuracy", "std"),
+                ("EC", "mean"),
+                ("EC", "std"),
+            ],
+        ]
+    )
+
+    pmeans = pmeans.round(2)
+    pmeans[("Accuracy", "std")] = pmeans[("Accuracy", "std")].apply(
+        lambda x: f"({x:0.2f})"
+    )
+    pmeans[("EC", "std")] = pmeans[("EC", "std")].apply(lambda x: f"({x:0.2f})")
+    pmeans = pmeans.sort_values(by=["data", "classifier"])
+
+    d = "" if downsample else "_baseline"
+    out = EXCEL_TABLES / f"data_classifier_means_sds{d}.xlsx"
+    pmeans.to_excel(out)
+    print(pmeans)
+    print(f"Saved means and sds to {out}")
+    if not downsample:
+        return
+
+    large_means = (
+        dfpl.drop(columns=["Downsample (%)", "rep"])
+        .groupby(["data", "classifier"])
+        .describe()
+        .reset_index()
+        .loc[
+            :,
+            [
+                ("data", ""),
+                ("classifier", ""),
+                ("Accuracy", "mean"),
+                ("Accuracy", "std"),
+                ("EC", "mean"),
+                ("EC", "std"),
+            ],
+        ]
+    )
+    large_means = large_means.round(2)
+    large_means[("Accuracy", "std")] = large_means[("Accuracy", "std")].apply(
+        lambda x: f"({x:0.2f})"
+    )
+    large_means[("EC", "std")] = large_means[("EC", "std")].apply(lambda x: f"({x:0.2f})")
+    large_means = large_means.sort_values(by=["data", "classifier"])
+
+    out = EXCEL_TABLES / f"data_classifier_means_sds_89downsample{d}.xlsx"
+    large_means.to_excel(out)
+    print(f"Saved large dowsnampling means and sds to {out}")
+
+
 if __name__ == "__main__":
     DATASETS = [
         # Dataset.Diabetes,
         # Dataset.Parkinsons,
-        # Dataset.SPECT,
+        Dataset.SPECT,
         # Dataset.Transfusion,
         # Dataset.HeartFailure,
-        Dataset.Diabetes130,
-        Dataset.Diabetes130Reduced,
-        # Dataset.MimicIV,
-        # Dataset.UTIResistance,
+        # Dataset.Diabetes130Reduced,
+        # Dataset.UTIResistanceReduced,
+        # Dataset.MimicIVReduced,
     ]
+    CLASSIFIERS = [
+        ClassifierKind.GBT,
+        ClassifierKind.LR,
+        ClassifierKind.RF,
+        ClassifierKind.SVM,
+    ]
+    # make_accuracy_table(downsample=False)
+    make_tables(datasets=DATASETS, kinds=CLASSIFIERS, downsample=False, force=True)
     # make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
     # make_montage_plots(DATASETS, norm=False)
-    make_custom_montage_plots(DATASETS)
+    # make_custom_montage_plots(DATASETS)
     # make_individual_plots(DATASETS, kinds=[*ClassifierKind])
     # for data in DATASETS:
     #     plot_correlations(data=data, force=False, dpi=300, means=False)
