@@ -45,7 +45,7 @@ def pred_root(
     kind: ClassifierKind,
     downsample: bool,
 ) -> Path:
-    root = PLAIN_OUTDIR if downsample is None else DOWNSAMPLE_OUTDIR
+    root = DOWNSAMPLE_OUTDIR if downsample else PLAIN_OUTDIR
     out = root / f"{dataset.value}/{kind.value}"
     return ensure_dir(out)
 
@@ -116,17 +116,30 @@ def compute_preds(args: ParallelArgs) -> None:
         X, y = X.iloc[idx_shuffle], y.iloc[idx_shuffle]
         skf = StratifiedKFold(n_splits=5, shuffle=False)
         # skf = KFold(n_splits=5, shuffle=False)
-        idx_train, idx_test = list(skf.split(y, y))[args.fold]
+        skf_splits = list(skf.split(y, y))
+        idx_train, idx_test = skf_splits[args.fold]
+        other_folds = list(range(5))
+        other_folds.remove(args.fold)
+        for fold_idx in other_folds:
+            idx_train_other, idx_test_other = skf_splits[fold_idx]
+            test_overlap = len(set(idx_test_other).intersection(idx_test))
+            if test_overlap > 0:
+                raise RuntimeError(
+                    "StratifiedKFold is bugged and producing overlapping test folds"
+                )
 
-        X_tr, y_tr = X.iloc[idx_train], y.iloc[idx_train]
-        X_test, y_test = X.iloc[idx_test], y.iloc[idx_test]
+        X_tr, y_tr = X.iloc[idx_train].copy(), y.iloc[idx_train].copy()
+        X_test, y_test = X.iloc[idx_test].copy(), y.iloc[idx_test].copy()
+        if not np.all(np.unique(y_test.index, return_counts=True)[1] == 1):
+            raise ValueError("Duplicate samples in test set.")
         classifier.fit(X_tr, y_tr, rng=rng)
         y_pred = classifier.predict(X_test)
 
-        # Ultimately we will concat along axis 0 all `preds` dfs like below to
-        # re-assemble the original test set. For this to work, we need the
-        # "y_true" and "y_pred" columns unshuffled. Thankfully, the Series
-        # index is actually useful for once and will make this work
+        # Ultimately we will concat along axis 0 all `preds` dfs like
+        # below to re-assemble the original test set. For this to
+        # work, we need the "y_true" and "y_pred" columns unshuffled.
+        # Thankfully, the Series index is actually useful for once
+        # and will make this work.
 
         # idx_unshuffle = np.ravel(np.argsort(y_test.index))
         # y_pred = np.ravel(y_pred)[idx_unshuffle]
@@ -284,6 +297,82 @@ def evaluate_downsampling(
         compute_preds,
         pargs,
         desc=f"Predictions for {classifier.name} on {dataset.name}",
+        **tqdm_args,
+    )
+
+
+def evaluate_baselines(
+    classifier: ClassifierKind,
+    dataset: Dataset,
+    n_reps: int = 1,
+    n_runs: int = 10,
+    max_workers: int = 1,
+    only_rep: Optional[int] = None,
+) -> None:
+    """
+    Parameters
+    ----------
+    n_reps: int
+        Number of times to generate a percentage
+
+    n_runs: int
+        Number of times to run k-fold per repeat
+    """
+    K = 5
+    # below just plucked from a random run of SeedSequence().entropy
+    entropy = 285216691326606742260051019197268485321
+    xgb_jobs, tqdm_workers = get_xgb_tqdm_workers(classifier=classifier, dataset=dataset)
+    ss = np.random.SeedSequence(entropy=entropy)
+    seeds = ss.spawn(n_reps * n_runs * K)
+    base_rng = np.random.default_rng(ss)
+    p_seed = base_rng.integers(0, 2**32 - 1)
+    percents = (
+        np.array(Halton(d=1, seed=p_seed).random(n_reps)) * 0.40 + 0.50
+    )  # [0.5, 0.9]
+    percents = np.clip(percents, a_min=0.5, a_max=1.0)
+    rngs = np.array([np.random.default_rng(seed) for seed in seeds])
+    split_seeds = np.array([rng.integers(0, 2**32 - 1) for rng in rngs]).reshape(
+        n_reps, n_runs, K
+    )
+    rngs = rngs.reshape(n_reps, n_runs, K)
+
+    pargs = []
+    tqdm_args = dict(chunksize=1, max_workers=tqdm_workers)
+
+    for rep in range(n_reps):
+        if only_rep is not None:
+            if rep != only_rep:
+                continue
+
+        for run in range(n_runs):
+            for fold in range(K):
+                pargs.append(
+                    ParallelArgs(
+                        kind=classifier,
+                        dataset=dataset,
+                        fold=fold,
+                        rep=rep,
+                        run=run,
+                        # We (perhaps) need each fold to get a different rng
+                        # for fitting, so rngs[rep][run][fold], below.
+                        fold_rng=rngs[rep][run][fold],
+                        # Within a *run* (i.e. 5 folds) shuffling needs to be
+                        # the same, (or we can't re-assemble the folds), so we
+                        # need the same rng for each fold, hence
+                        # rngs[rep][run][0].
+                        shuffle_rng=rngs[rep][run][0],
+                        # Within a *rep* (i.e. 10 runs) the same downsampling
+                        # set must be maintained, or the predictions across
+                        # runs cannot be compared for EC. So rngs[rep][0][0].
+                        split=split_seeds[rep][0][0],
+                        downsample=None,
+                    )
+                )
+
+    process_map(
+        compute_preds,
+        pargs,
+        desc=f"Baseline predictions for {classifier.name} on {dataset.name}",
         **tqdm_args,
     )
 

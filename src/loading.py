@@ -148,7 +148,8 @@ def load_SPECT() -> Tuple[DataFrame, Series]:
     target = "diagnosis"
     x1, y1 = load_df(source, target)
     x2, y2 = load_df(source2, target)
-    x, y = pd.concat([x1, x2], axis=0), pd.concat([y1, y2], axis=0)
+    x = pd.concat([x1, x2], axis=0, ignore_index=True)
+    y = pd.concat([y1, y2], axis=0, ignore_index=True)
     # all one-hots, no need to standardize
     return x, y
 
