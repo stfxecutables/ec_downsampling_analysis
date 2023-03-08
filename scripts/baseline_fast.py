@@ -22,12 +22,12 @@ if __name__ == "__main__":
         # Dataset.Diabetes,
         # Dataset.Transfusion,
         # Dataset.Parkinsons,
-        Dataset.SPECT,
+        # Dataset.SPECT,
         # Dataset.Diabetes130,
         # Dataset.Diabetes130Reduced,
         # Dataset.HeartFailure,
         # Dataset.MimicIV,
-        # Dataset.MimicIVReduced,
+        Dataset.MimicIVReduced,
         # Dataset.UTIResistance,
         # Dataset.UTIResistanceReduced,
     ]
@@ -48,7 +48,7 @@ if __name__ == "__main__":
                 classifier=args.kind,
                 dataset=args.dataset,
                 n_reps=1,
-                n_runs=10,
+                n_runs=500,
                 max_workers=MAX_WORKERS,
             )
 
@@ -58,7 +58,7 @@ if __name__ == "__main__":
         evaluate_baselines(
             classifier=args.kind,
             dataset=args.dataset,
-            n_reps=200,
-            n_runs=10,
+            n_reps=500,
+            n_runs=1,
             max_workers=MAX_WORKERS,
         )

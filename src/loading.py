@@ -605,6 +605,7 @@ if __name__ == "__main__":
     # df = load_diabetes130_continuous(n_components=5)
     # df = load_uti_reduced(n_components=100)
     df = load_mimic_iv(n_components=5)
+    # df = load_diabetes()
     sys.exit()
 
     datasets: Dict[str, Callable[[], Tuple[DataFrame, Series]]] = {

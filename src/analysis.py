@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sbn
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
 from joblib import Memory
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -27,7 +29,9 @@ from pandas import DataFrame, Series
 from scipy.stats import linregress
 from seaborn import FacetGrid
 from statsmodels.api import OLS
+from statsmodels.graphics.regressionplots import plot_fit
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from statsmodels.regression.linear_model import RegressionResults
 from statsmodels.regression.rolling import RollingOLS
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
@@ -149,7 +153,7 @@ def load_preds(
                 try:
                     df = pd.read_parquet(fold)
                     dfs.append(df)
-                except TypeError as e:
+                except (TypeError, OSError) as e:
                     raise RuntimeError(
                         f"Likely corrupt data at {fold}. Details above."
                     ) from e
@@ -1099,6 +1103,7 @@ def make_accuracy_table(downsample: bool = True) -> None:
     )
     df_pairs["Accuracy"] *= 100
     df_pairs["EC"] *= 100
+    df_runs["Accuracy"] *= 100
 
     dfpl = df_pairs.loc[df_pairs["Downsample (%)"] > 89, :]
     pmeans = (
@@ -1163,15 +1168,81 @@ def make_accuracy_table(downsample: bool = True) -> None:
     print(f"Saved large dowsnampling means and sds to {out}")
 
 
+def make_statistical_plot(dataset: Dataset, kind: ClassifierKind) -> None:
+    df_pairs, df_runs = make_table(dataset=dataset, kind=kind, force=False)
+    df_pairs.rename(columns={"Downsample (%)": "Downsample"}, inplace=True)
+    dfm = (
+        df_pairs.drop(columns="Accuracy")
+        .groupby("rep")
+        .describe()[[("EC", "mean"), ("Downsample", "mean")]]
+        .droplevel(1, axis=1)
+    )
+    model: RegressionResults
+    mmodel: RegressionResults
+    fig, axes = plt.subplots(ncols=4, sharex=True, sharey=True)
+    model = smf.gls(formula="EC ~ Downsample + 1", data=df_pairs).fit()
+    idx = np.argsort(df_pairs.Downsample)
+    axes[0].scatter(df_pairs.Downsample[idx], df_pairs.EC[idx], color="black")
+    axes[0].plot(df_pairs.Downsample[idx], model.predict()[idx], color="red", label="fit")
+    axes[0].set_xlabel("Downsampling (%)")
+    axes[0].set_ylabel("Pairwise ECs")
+    axes[0].set_title(
+        f"BIC={int(model.bic)}\nR2={model.rsquared:0.2f}, p={model.f_pvalue:0.3f}",
+        fontsize=10,
+    )
+
+    model = smf.gls(formula="EC ~ Downsample + 1", data=dfm).fit()
+    idx = np.argsort(dfm.Downsample)
+    axes[1].scatter(dfm.Downsample[idx], dfm.EC[idx], color="black")
+    axes[1].plot(dfm.Downsample[idx], model.predict()[idx], color="red", label="fit")
+    axes[1].set_xlabel("Downsampling (%)")
+    axes[1].set_ylabel("Mean ECs")
+    axes[1].set_title(
+        f"BIC={int(model.bic)}\nR2={model.rsquared:0.2f}, p={model.f_pvalue:0.3f}",
+        fontsize=10,
+    )
+
+    model = smf.gls(
+        formula="EC ~ Downsample + np.power(Downsample, 2) + 1", data=dfm
+    ).fit()
+    idx = np.argsort(dfm.Downsample[idx])
+    axes[2].scatter(dfm.Downsample[idx], dfm.EC[idx], color="black")
+    axes[2].plot(dfm.Downsample[idx], model.predict()[idx], color="red", label="fit")
+    axes[2].set_xlabel("Downsampling (%)")
+    axes[2].set_ylabel("Mean ECs")
+    axes[2].set_title(
+        f"BIC={int(model.bic)}\nR2={model.rsquared:0.2f}, p={model.f_pvalue:0.3f}",
+        fontsize=10,
+    )
+
+    model = smf.gls(
+        formula="EC ~ Downsample + np.power(Downsample, 2) + np.power(Downsample, 3) + 1",
+        data=dfm,
+    ).fit()
+    idx = np.argsort(dfm.Downsample)
+    axes[3].scatter(dfm.Downsample[idx], dfm.EC[idx], color="black")
+    axes[3].plot(dfm.Downsample[idx], model.predict()[idx], color="red", label="fit")
+    axes[3].set_xlabel("Downsampling (%)")
+    axes[3].set_ylabel("Mean ECs")
+    axes[3].set_title(
+        f"BIC={int(model.bic)}\nR2={model.rsquared:0.2f}, p={model.f_pvalue:0.3f}",
+        fontsize=10,
+    )
+
+    fig.set_size_inches(w=15, h=6)
+    plt.show()
+    print()
+
+
 if __name__ == "__main__":
     DATASETS = [
         # Dataset.Diabetes,
         # Dataset.Parkinsons,
-        Dataset.SPECT,
+        # Dataset.SPECT,
         # Dataset.Transfusion,
         # Dataset.HeartFailure,
         # Dataset.Diabetes130Reduced,
-        # Dataset.UTIResistanceReduced,
+        Dataset.UTIResistanceReduced,
         # Dataset.MimicIVReduced,
     ]
     CLASSIFIERS = [
@@ -1180,8 +1251,11 @@ if __name__ == "__main__":
         ClassifierKind.RF,
         ClassifierKind.SVM,
     ]
-    # make_accuracy_table(downsample=False)
-    make_tables(datasets=DATASETS, kinds=CLASSIFIERS, downsample=False, force=True)
+    # for classifier in CLASSIFIERS:
+    #     make_statistical_plot(Dataset.Diabetes, kind=classifier)
+    # make_tables(datasets=DATASETS, kinds=CLASSIFIERS, downsample=False, force=True)
+    make_accuracy_table(downsample=False)
+    # make_tables(datasets=DATASETS, kinds=CLASSIFIERS, downsample=False, force=True)
     # make_tables(datasets=DATASETS, kinds=[*ClassifierKind], force=True)
     # make_montage_plots(DATASETS, norm=False)
     # make_custom_montage_plots(DATASETS)
